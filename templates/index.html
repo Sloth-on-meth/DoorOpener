@@ -488,18 +488,18 @@
         <!-- Keypad -->
         <div class="keypad"
             style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 1.5rem; width: 280px; margin-left: auto; margin-right: auto;">
-            <button class="keypad-btn" onclick="addDigit('1')">1</button>
-            <button class="keypad-btn" onclick="addDigit('2')">2</button>
-            <button class="keypad-btn" onclick="addDigit('3')">3</button>
-            <button class="keypad-btn" onclick="addDigit('4')">4</button>
-            <button class="keypad-btn" onclick="addDigit('5')">5</button>
-            <button class="keypad-btn" onclick="addDigit('6')">6</button>
-            <button class="keypad-btn" onclick="addDigit('7')">7</button>
-            <button class="keypad-btn" onclick="addDigit('8')">8</button>
-            <button class="keypad-btn" onclick="addDigit('9')">9</button>
-            <button class="keypad-btn clear-btn" onclick="clearPin()">⌫</button>
-            <button class="keypad-btn" onclick="addDigit('0')">0</button>
-            <button id="submitBtn" class="keypad-btn submit-btn" onclick="openDoor()">✓</button>
+            <button class="keypad-btn" data-digit="1">1</button>
+            <button class="keypad-btn" data-digit="2">2</button>
+            <button class="keypad-btn" data-digit="3">3</button>
+            <button class="keypad-btn" data-digit="4">4</button>
+            <button class="keypad-btn" data-digit="5">5</button>
+            <button class="keypad-btn" data-digit="6">6</button>
+            <button class="keypad-btn" data-digit="7">7</button>
+            <button class="keypad-btn" data-digit="8">8</button>
+            <button class="keypad-btn" data-digit="9">9</button>
+            <button class="keypad-btn clear-btn" data-action="clear">⌫</button>
+            <button class="keypad-btn" data-digit="0">0</button>
+            <button id="submitBtn" class="keypad-btn submit-btn" data-action="submit">✓</button>
         </div>
 
         {% if oidc_enabled %}
@@ -557,6 +557,21 @@
         let isSubmitting = false;
         let autoSubmitTimer = null;
         let blockCountdownTimer = null;
+
+        document.querySelectorAll('.keypad-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+              const digit = btn.dataset.digit;
+              const action = btn.dataset.action;
+            
+              if (digit) {
+                addDigit(digit);
+              } else if (action === 'clear') {
+                clearPin();
+              } else if (action === 'submit') {
+                openDoor();
+              }
+            });
+        });
 
         function addDigit(digit) {
             if (isSubmitting) return;
@@ -812,10 +827,15 @@
             fetch('/battery', { credentials: 'same-origin', cache: 'no-store' })
                 .then(response => response.json())
                 .then(data => {
-                    updateBatteryLevel(data.level);
+                    if (data.level === null || data.level === "null" || data.level === undefined) {
+                        document.getElementById("battery-container").style.display = "none";
+                    } else {
+                        document.getElementById("battery-container").style.display = "flex";
+                        updateBatteryLevel(Number(data.level));
+                    }
                 })
                 .catch(error => {
-                    updateBatteryLevel(null);
+                    document.getElementById("battery-container").style.display = "none";
                 });
         }
 
