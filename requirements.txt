@@ -3,4 +3,4 @@ requests == 2.32.5
 Werkzeug == 3.1.4
 pytz == 2025.2
 pytest ==  8.4.0
-Authlib == 1.6.5
+Authlib == 1.6.6
