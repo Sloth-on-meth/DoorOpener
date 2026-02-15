@@ -16,8 +16,6 @@ COPY app.py config.py security.py ha_client.py users_store.py ./
 COPY templates/ ./templates/
 COPY static/ ./static/
 
-# Copy HA add-on run script
-COPY run.sh /run.sh
-RUN chmod +x /run.sh
-
-CMD ["/run.sh"]
+# s6-overlay service: place run script where the init system expects it
+COPY run.sh /etc/services.d/dooropener/run
+RUN chmod +x /etc/services.d/dooropener/run
