@@ -1,4 +1,5 @@
 name: DoorOpener
+version: "2.0.8"
 slug: dooropener
 description: >-
   A secure web interface for controlling smart door openers via Home Assistant.
