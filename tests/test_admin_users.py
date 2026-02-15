@@ -37,8 +37,6 @@ def _admin_session(client):
 
 
 def test_admin_users_list_empty(mock_users_store, monkeypatch):
-    import app as app_module
-    monkeypatch.setattr(app_module, "user_pins", {})
     c = client_app()
     _admin_session(c)
     response = c.get("/admin/users")
@@ -49,8 +47,6 @@ def test_admin_users_list_empty(mock_users_store, monkeypatch):
 
 
 def test_admin_users_list_with_json_users(mock_users_store, monkeypatch):
-    import app as app_module
-    monkeypatch.setattr(app_module, "user_pins", {})
     mock_users_store.create_user("alice", "1234")
     mock_users_store.create_user("bob", "5678")
     mock_users_store.touch_user("alice")
@@ -66,7 +62,6 @@ def test_admin_users_list_with_json_users(mock_users_store, monkeypatch):
 
     alice = next(u for u in users if u["username"] == "alice")
     bob = next(u for u in users if u["username"] == "bob")
-    assert alice["source"] == "store"
     assert alice["can_edit"] is True
     assert alice["times_used"] == 1
     assert bob["times_used"] == 0
@@ -170,10 +165,7 @@ def test_admin_users_unauthenticated_access(mock_users_store):
 
 
 def test_times_used_counter_integration(mock_users_store, monkeypatch):
-    import app as app_module
     mock_users_store.create_user("testuser", "1234")
-    monkeypatch.setattr(app_module, "user_pins", {})
-    app_module.test_mode = True
 
     c = client_app()
     response = c.post(
@@ -207,13 +199,11 @@ def test_user_management_ui_data_structure(mock_users_store):
     for user in users:
         assert "username" in user
         assert "active" in user
-        assert "source" in user
         assert "can_edit" in user
         assert "created_at" in user
         assert "last_used_at" in user
-        if user["source"] == "store":
-            assert "times_used" in user
-            assert isinstance(user["times_used"], int)
+        assert "times_used" in user
+        assert isinstance(user["times_used"], int)
 
     active_user = next(u for u in users if u["username"] == "active_user")
     inactive_user = next(u for u in users if u["username"] == "inactive_user")

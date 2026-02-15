@@ -59,7 +59,7 @@ def client():
 
 @pytest.fixture(autouse=True)
 def reset_state():
-    """Reset rate-limiter state and user_pins between tests."""
+    """Reset rate-limiter state and users_store between tests."""
     import app as app_module
 
     app_module.rate_limiter.ip_failed.clear()
@@ -68,7 +68,8 @@ def reset_state():
     app_module.rate_limiter.session_blocked_until.clear()
     app_module.rate_limiter.global_failed = 0
     app_module.rate_limiter.global_last_reset = app_module.get_current_time()
-    app_module.user_pins.clear()
-    # Reset test_mode to True (options.json default)
-    app_module.test_mode = True
+    # Reset users_store to empty (tests add users as needed)
+    app_module.users_store.data = {"users": {}}
+    app_module.users_store._loaded = True
+    app_module.users_store._pin_cache = None
     yield

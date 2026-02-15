@@ -10,6 +10,7 @@ import json
 import logging
 import os
 from datetime import timedelta
+from functools import wraps
 from logging.handlers import RotatingFileHandler
 
 import secrets
@@ -35,23 +36,6 @@ from security import (
 )
 from config import get_current_time
 from users_store import UsersStore
-
-# ---------------------------------------------------------------------------
-# Re-export key names for backward compatibility with test suite
-# ---------------------------------------------------------------------------
-test_mode = config.test_mode
-entity_id = config.entity_id
-ha_url = config.ha_url
-ha_token = config.ha_token
-ha_ca_bundle = config.ha_ca_bundle
-admin_password = config.admin_password
-MAX_ATTEMPTS = config.MAX_ATTEMPTS
-BLOCK_TIME = config.BLOCK_TIME
-MAX_GLOBAL_ATTEMPTS_PER_HOUR = config.MAX_GLOBAL_ATTEMPTS_PER_HOUR
-SESSION_MAX_ATTEMPTS = config.SESSION_MAX_ATTEMPTS
-server_port = config.server_port
-battery_entity = config.battery_entity
-device_name = config.device_name
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -111,26 +95,10 @@ app.config.update(
 rate_limiter = RateLimiter()
 ha_client = HAClient()
 
-# Legacy base PINs dict - empty in production; tests can populate
-user_pins: dict[str, str] = {}
-
-# Expose rate-limiter collections for tests (mutable references)
-ip_failed_attempts = rate_limiter.ip_failed
-ip_blocked_until = rate_limiter.ip_blocked_until
-session_failed_attempts = rate_limiter.session_failed
-session_blocked_until = rate_limiter.session_blocked_until
-
 USERS_STORE_PATH = os.environ.get(
     "USERS_STORE_PATH", os.path.join(os.path.dirname(__file__), "users.json")
 )
 users_store = UsersStore(USERS_STORE_PATH)
-
-
-def get_effective_user_pins() -> dict:
-    try:
-        return users_store.effective_pins(user_pins)
-    except Exception:
-        return dict(user_pins)
 
 
 # ---------------------------------------------------------------------------
@@ -250,12 +218,8 @@ def open_door():
                    "Invalid PIN format")
             return jsonify({"status": "error", "message": "Invalid PIN format"}), 400
 
-        # Match PIN
-        matched_user = None
-        for user, user_pin in get_effective_user_pins().items():
-            if validated_pin == user_pin:
-                matched_user = user
-                break
+        # Match PIN (O(1) via cached reverse map)
+        matched_user = users_store.lookup_pin(validated_pin)
 
         if not matched_user:
             reason_key, remaining_attempts = rate_limiter.record_failure(
@@ -394,12 +358,24 @@ def admin_logout():
 
 
 # ---------------------------------------------------------------------------
+# Admin auth decorator
+# ---------------------------------------------------------------------------
+def require_admin(f):
+    """Decorator that returns 401 unless the session is admin-authenticated."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("admin_authenticated"):
+            return jsonify({"error": "Authentication required"}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
+# ---------------------------------------------------------------------------
 # Logs
 # ---------------------------------------------------------------------------
 @app.route("/admin/logs")
+@require_admin
 def admin_logs():
-    if not session.get("admin_authenticated"):
-        return jsonify({"error": "Authentication required"}), 401
     try:
         logs = _parse_log_file()
         return jsonify({"logs": logs})
@@ -445,9 +421,8 @@ def _parse_log_file():
 
 
 @app.route("/admin/logs/clear", methods=["POST"])
+@require_admin
 def admin_logs_clear():
-    if not session.get("admin_authenticated"):
-        return jsonify({"error": "Authentication required"}), 401
 
     body = request.get_json(silent=True) or {}
     mode = (body.get("mode") or "all").lower()
@@ -498,7 +473,8 @@ def admin_logs_clear():
         else:
             return jsonify({"error": "Invalid mode"}), 400
 
-        _audit(get_client_identifier()[0], get_client_identifier()[1],
+        ip, sid, _ = get_client_identifier()
+        _audit(ip, sid,
                "ADMIN", "ADMIN_LOGS_CLEAR",
                f"mode={mode}, removed={removed}, kept={kept}")
         return jsonify({"status": "ok", "mode": mode,
@@ -509,41 +485,25 @@ def admin_logs_clear():
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # User management
 # ---------------------------------------------------------------------------
-def _require_admin_authenticated():
-    return bool(session.get("admin_authenticated"))
-
-
 @app.route("/admin/users", methods=["GET"])
+@require_admin
 def admin_users_list():
-    if not _require_admin_authenticated():
-        return jsonify({"error": "Authentication required"}), 401
     try:
         store_users = users_store.list_users(include_pins=False).get("users", [])
-        store_names = {u["username"] for u in store_users}
-        config_only = []
-        for name in sorted(user_pins.keys()):
-            if name in store_names:
-                continue
-            config_only.append({
-                "username": name, "active": True,
-                "created_at": None, "updated_at": None, "last_used_at": None,
-                "source": "config", "can_edit": False,
-            })
         for u in store_users:
-            u["source"] = "store"
             u["can_edit"] = True
-        return jsonify({"users": store_users + config_only})
+        return jsonify({"users": store_users})
     except Exception as e:
         logger.error("Error listing users: %s", e)
         return jsonify({"error": "Failed to list users"}), 500
 
 
 @app.route("/admin/users", methods=["POST"])
+@require_admin
 def admin_users_create():
-    if not _require_admin_authenticated():
-        return jsonify({"error": "Authentication required"}), 401
     try:
         body = request.get_json(silent=True) or {}
         username = body.get("username")
@@ -551,11 +511,9 @@ def admin_users_create():
         active = bool(body.get("active", True))
         if not username or not pin:
             return jsonify({"error": "username and pin are required"}), 400
-        if username in user_pins:
-            return jsonify({"error": "User exists in config and cannot be edited via UI"}), 409
         users_store.create_user(username, pin, active)
-        _audit(get_client_identifier()[0], get_client_identifier()[1],
-               "ADMIN", "ADMIN_USER_CREATE", f"username={username}")
+        ip, sid, _ = get_client_identifier()
+        _audit(ip, sid, "ADMIN", "ADMIN_USER_CREATE", f"username={username}")
         return jsonify({"status": "created"}), 201
     except KeyError:
         return jsonify({"error": "User already exists"}), 409
@@ -568,16 +526,13 @@ def admin_users_create():
 
 
 @app.route("/admin/users/<username>", methods=["PUT"])
+@require_admin
 def admin_users_update(username: str):
-    if not _require_admin_authenticated():
-        return jsonify({"error": "Authentication required"}), 401
-    if username in user_pins:
-        return jsonify({"error": "Config-defined users cannot be edited via UI"}), 409
     try:
         body = request.get_json(silent=True) or {}
         users_store.update_user(username, pin=body.get("pin"), active=body.get("active"))
-        _audit(get_client_identifier()[0], get_client_identifier()[1],
-               "ADMIN", "ADMIN_USER_UPDATE", f"username={username}")
+        ip, sid, _ = get_client_identifier()
+        _audit(ip, sid, "ADMIN", "ADMIN_USER_UPDATE", f"username={username}")
         return jsonify({"status": "updated"}), 200
     except KeyError:
         return jsonify({"error": "User not found"}), 404
@@ -590,15 +545,12 @@ def admin_users_update(username: str):
 
 
 @app.route("/admin/users/<username>", methods=["DELETE"])
+@require_admin
 def admin_users_delete(username: str):
-    if not _require_admin_authenticated():
-        return jsonify({"error": "Authentication required"}), 401
-    if username in user_pins:
-        return jsonify({"error": "Config-defined users cannot be deleted via UI"}), 409
     try:
         users_store.delete_user(username)
-        _audit(get_client_identifier()[0], get_client_identifier()[1],
-               "ADMIN", "ADMIN_USER_DELETE", f"username={username}")
+        ip, sid, _ = get_client_identifier()
+        _audit(ip, sid, "ADMIN", "ADMIN_USER_DELETE", f"username={username}")
         return jsonify({"status": "deleted"}), 200
     except KeyError:
         return jsonify({"error": "User not found"}), 404

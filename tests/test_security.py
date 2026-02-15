@@ -51,7 +51,8 @@ def test_suspicious_request_blocked_open_door(_client):
 
 
 def test_global_rate_limit_blocks(_client, app_module):
-    app_module.rate_limiter.global_failed = app_module.MAX_GLOBAL_ATTEMPTS_PER_HOUR
+    import config
+    app_module.rate_limiter.global_failed = config.MAX_GLOBAL_ATTEMPTS_PER_HOUR
     resp = _client.post(
         "/open-door", data=json.dumps({"pin": "1234"}), headers=_std_headers()
     )
@@ -88,9 +89,10 @@ def test_open_door_ip_blocked_flow(_client, app_module, monkeypatch):
 
 
 def test_admin_auth_blocking(_client, app_module, monkeypatch):
+    import config
     wrong = {"password": "nope", "remember_me": False}
     h = _std_headers()
-    for _ in range(app_module.SESSION_MAX_ATTEMPTS):
+    for _ in range(config.SESSION_MAX_ATTEMPTS):
         r = _client.post("/admin/auth", data=json.dumps(wrong), headers=h)
         assert r.status_code == 403
     r = _client.post("/admin/auth", data=json.dumps(wrong), headers=h)
@@ -100,7 +102,6 @@ def test_admin_auth_blocking(_client, app_module, monkeypatch):
 def test_admin_auth_success(_client, app_module, monkeypatch):
     import config
     monkeypatch.setattr(config, "admin_password", "secret")
-    monkeypatch.setattr(app_module, "admin_password", "secret")
     r = _client.post(
         "/admin/auth",
         data=json.dumps({"password": "secret", "remember_me": True}),
@@ -119,8 +120,7 @@ def test_testmode_pin_success(_client, app_module):
     app_module.rate_limiter.global_last_reset = get_current_time()
     app_module.rate_limiter.ip_blocked_until.clear()
     app_module.rate_limiter.session_blocked_until.clear()
-    app_module.user_pins["alice"] = "1234"
-    app_module.test_mode = True
+    app_module.users_store.create_user("alice", "1234")
     r = _client.post(
         "/open-door", data=json.dumps({"pin": "1234"}), headers=_std_headers()
     )
@@ -163,9 +163,9 @@ def test_battery_exception_returns_none(_client, app_module):
 
 def test_open_door_success_switch(_client, app_module, monkeypatch):
     import config
-    app_module.user_pins["alice"] = "1234"
+    app_module.users_store.create_user("alice", "1234")
     monkeypatch.setattr(config, "entity_id", "switch.test_door")
-    app_module.test_mode = False
+    monkeypatch.setattr(config, "test_mode", False)
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.raise_for_status = lambda: None
@@ -180,9 +180,9 @@ def test_open_door_success_switch(_client, app_module, monkeypatch):
 
 def test_open_door_success_lock(_client, app_module, monkeypatch):
     import config
-    app_module.user_pins["alice"] = "1234"
+    app_module.users_store.create_user("alice", "1234")
     monkeypatch.setattr(config, "entity_id", "lock.test_door")
-    app_module.test_mode = False
+    monkeypatch.setattr(config, "test_mode", False)
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.raise_for_status = lambda: None
@@ -195,9 +195,9 @@ def test_open_door_success_lock(_client, app_module, monkeypatch):
 
 def test_open_door_success_input_boolean(_client, app_module, monkeypatch):
     import config
-    app_module.user_pins["alice"] = "1234"
+    app_module.users_store.create_user("alice", "1234")
     monkeypatch.setattr(config, "entity_id", "input_boolean.open")
-    app_module.test_mode = False
+    monkeypatch.setattr(config, "test_mode", False)
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.raise_for_status = lambda: None
@@ -245,7 +245,7 @@ def test_admin_logs_parsing(_client, app_module, tmp_path):
 
 def test_blocked_denies_correct_pin_and_returns_blocked_until(_client, app_module):
     from config import get_current_time
-    app_module.user_pins["alice"] = "1234"
+    app_module.users_store.create_user("alice", "1234")
     _client.post("/open-door", data=json.dumps({}), headers=_std_headers())
     with _client.session_transaction() as s:
         sid = s.get("_session_id")
@@ -261,12 +261,13 @@ def test_blocked_denies_correct_pin_and_returns_blocked_until(_client, app_modul
 
 
 def test_open_door_block_set_on_failure_includes_blocked_until(_client, app_module):
+    import config
     headers = _std_headers()
     _client.post("/open-door", data=json.dumps({"pin": "0000"}), headers=headers)
     with _client.session_transaction() as s:
         sid = s.get("_session_id")
     assert sid
-    for i in range(app_module.SESSION_MAX_ATTEMPTS - 1):
+    for i in range(config.SESSION_MAX_ATTEMPTS - 1):
         r = _client.post("/open-door", data=json.dumps({"pin": "0000"}), headers=headers)
     assert r.status_code == 401
     data = r.get_json()
@@ -279,7 +280,7 @@ def test_open_door_block_set_on_failure_includes_blocked_until(_client, app_modu
 
 
 def test_persisted_block_cookie_blocks_correct_pin(_client, app_module):
-    app_module.user_pins["zoe"] = "4321"
+    app_module.users_store.create_user("zoe", "4321")
     with _client.session_transaction() as s:
         s["_session_id"] = "sessCookie"
         s["blocked_until_ts"] = time.time() + 60
@@ -293,7 +294,7 @@ def test_persisted_block_cookie_blocks_correct_pin(_client, app_module):
 
 
 def test_success_clears_persisted_block_cookie_when_expired(_client, app_module):
-    app_module.user_pins["amy"] = "1234"
+    app_module.users_store.create_user("amy", "1234")
     with _client.session_transaction() as s:
         s["_session_id"] = "sessExpired"
         s["blocked_until_ts"] = time.time() - 1  # already expired

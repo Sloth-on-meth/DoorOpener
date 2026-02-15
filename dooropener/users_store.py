@@ -12,7 +12,7 @@ def _now_iso() -> str:
 
 
 class UsersStore:
-    """JSON-backed user store with atomic writes and merge-over-config behavior.
+    """JSON-backed user store with cached reverse PIN lookup.
 
     - JSON schema:
       {
@@ -20,15 +20,14 @@ class UsersStore:
           "alice": {"pin": "1234", "active": true, "created_at": "...", "updated_at": "...", "last_used_at": null}
         }
       }
-    - Effective PINs: merge base_pins (hardcoded dict) with overrides/additions in JSON.
-      If a username exists in JSON, it takes precedence (including active flag).
-      Users only present in base_pins are considered active.
+    - Maintains a cached ``{pin: username}`` reverse map, invalidated on any CRUD operation.
     """
 
     def __init__(self, path: str):
         self.path = path
         self.data: Dict[str, Any] = {"users": {}}
         self._loaded = False
+        self._pin_cache: Dict[str, str] | None = None  # pin -> username
 
     def _load_file(self) -> None:
         if self._loaded:
@@ -42,41 +41,44 @@ class UsersStore:
                     ):
                         self.data = {"users": {}}
             else:
-                # ensure directory exists
                 os.makedirs(os.path.dirname(self.path), exist_ok=True)
                 self.data = {"users": {}}
         except Exception:
-            # fallback to empty on any error
             self.data = {"users": {}}
         finally:
             self._loaded = True
+            self._pin_cache = None  # invalidate on load
 
     def _save_atomic(self) -> None:
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         with open(self.path, "w", encoding="utf-8") as f:
             json.dump(self.data, f, ensure_ascii=False, indent=2)
+        self._pin_cache = None  # invalidate on write
 
-    def effective_pins(self, base_pins: Dict[str, str]) -> Dict[str, str]:
-        self._load_file()
-        effective: Dict[str, str] = {}
-        # Start with base pins (implicitly active)
-        for user, pin in (base_pins or {}).items():
-            effective[user] = pin
-        # Apply JSON overrides/additions
+    def _invalidate_cache(self) -> None:
+        self._pin_cache = None
+
+    def get_pin_map(self) -> Dict[str, str]:
+        """Return cached ``{pin: username}`` dict of active users."""
+        self._ensure_loaded()
+        if self._pin_cache is not None:
+            return self._pin_cache
+        result: Dict[str, str] = {}
         for user, meta in self.data.get("users", {}).items():
-            active = bool(meta.get("active", True))
-            if not active:
-                # remove from effective if present
-                if user in effective:
-                    del effective[user]
+            if not bool(meta.get("active", True)):
                 continue
             pin = meta.get("pin")
             if isinstance(pin, str) and 4 <= len(pin) <= 8 and pin.isdigit():
-                effective[user] = pin
-        return effective
+                result[pin] = user
+        self._pin_cache = result
+        return result
+
+    def lookup_pin(self, pin: str) -> str | None:
+        """Return username for *pin*, or ``None`` if no match."""
+        return self.get_pin_map().get(pin)
 
     def list_users(self, include_pins: bool = False) -> Dict[str, Any]:
-        self._load_file()
+        self._ensure_loaded()
         items = []
         for user, meta in self.data.get("users", {}).items():
             item = {

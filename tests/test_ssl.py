@@ -41,8 +41,9 @@ def test_verify_uses_ca_bundle_when_set(client, monkeypatch):
 
 def test_post_verify_defaults_to_true_without_ca_bundle(client, monkeypatch):
     import app as app_module
-    app_module.test_mode = False
-    app_module.user_pins["alice"] = "1234"
+    import config
+    monkeypatch.setattr(config, "test_mode", False)
+    app_module.users_store.create_user("alice", "1234")
     app_module.ha_client.session.verify = True
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -55,8 +56,9 @@ def test_post_verify_defaults_to_true_without_ca_bundle(client, monkeypatch):
 
 def test_post_verify_uses_ca_bundle_when_set(client, monkeypatch):
     import app as app_module
-    app_module.test_mode = False
-    app_module.user_pins["bob"] = "5678"
+    import config
+    monkeypatch.setattr(config, "test_mode", False)
+    app_module.users_store.create_user("bob", "5678")
     ca_path = "/etc/dooropener/ha-ca.pem"
     app_module.ha_client.session.verify = ca_path
     mock_resp = MagicMock()

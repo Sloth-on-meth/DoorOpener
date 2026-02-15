@@ -39,8 +39,7 @@ def test_counters_reset_on_success_after_no_block(client, monkeypatch):
         "app.get_client_identifier",
         lambda: ("2.2.2.2", "sessReset", "idReset"),
     )
-    app_module.user_pins["ok"] = "9999"
-    app_module.test_mode = True
+    app_module.users_store.create_user("ok", "9999")
 
     headers = {
         "User-Agent": "pytest-client/1.0 (+https://example.test)",
@@ -54,15 +53,15 @@ def test_counters_reset_on_success_after_no_block(client, monkeypatch):
     r2 = client.post("/open-door", json={"pin": "9999"}, headers=headers)
     assert r2.status_code in (200, 502, 500)
 
-    assert app_module.ip_failed_attempts["idReset"] == 0
-    assert app_module.session_failed_attempts["sessReset"] == 0
+    assert app_module.rate_limiter.ip_failed.get("idReset", 0) == 0
+    assert app_module.rate_limiter.session_failed.get("sessReset", 0) == 0
     assert (
-        "idReset" not in app_module.ip_blocked_until
-        or not app_module.ip_blocked_until["idReset"]
+        "idReset" not in app_module.rate_limiter.ip_blocked_until
+        or not app_module.rate_limiter.ip_blocked_until["idReset"]
     )
     assert (
-        "sessReset" not in app_module.session_blocked_until
-        or not app_module.session_blocked_until["sessReset"]
+        "sessReset" not in app_module.rate_limiter.session_blocked_until
+        or not app_module.rate_limiter.session_blocked_until["sessReset"]
     )
 
 
@@ -74,8 +73,7 @@ def test_counters_not_reset_on_success_when_block_active(client, monkeypatch):
         "app.get_client_identifier",
         lambda: ("3.3.3.3", "sessBlock", "idBlock"),
     )
-    app_module.user_pins["ok2"] = "1111"
-    app_module.test_mode = True
+    app_module.users_store.create_user("ok2", "1111")
 
     app_module.rate_limiter.session_blocked_until[
         "sessBlock"
