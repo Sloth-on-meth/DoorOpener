@@ -2,21 +2,9 @@
 
 A secure web interface for controlling smart door openers via Home Assistant. Features a modern glass-morphism UI with visual keypad, per-user PINs, audio feedback, battery monitoring, and comprehensive brute-force protection.
 
-[![CI](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/ci.yml)
-[![Docker Build](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/docker-build.yml/badge.svg?branch=main)](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/docker-build.yml)
+[![CI](https://github.com/leonardpitzu/DoorOpener/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/leonardpitzu/DoorOpener/actions/workflows/ci.yml)
 ![Version](https://img.shields.io/badge/version-2.0.0-blue?style=flat-square)
 ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue?style=flat-square)
-
----
-
-<details>
-  <summary><strong>Help Wanted: Home Assistant Add-on</strong></summary>
-
-  ### Home Assistant Add-on Needed!
-  If you know how to package this as a proper Home Assistant add-on, please open a PR!
-
-  > **Important:** Any add-on solution must not break standalone usage. The project must remain fully usable both as a Home Assistant add-on _and_ as a standalone app (Docker).
-</details>
 
 ---
 
@@ -46,7 +34,7 @@ DoorOpener provides a web-based keypad interface to remotely open doors connecte
 1. In Home Assistant go to **Settings → Add-ons → Add-on Store → ⋮ → Repositories**
 2. Paste the repository URL:
    ```
-   https://github.com/Sloth-on-meth/DoorOpener
+   https://github.com/leonardpitzu/DoorOpener
    ```
 3. Find **DoorOpener** in the store and click **Install**
 4. Configure `entity_id` and `admin_password` in the add-on options
@@ -55,46 +43,24 @@ DoorOpener provides a web-based keypad interface to remotely open doors connecte
 > When running as an add-on you can leave `ha_url` and `ha_token` empty — the
 > Supervisor API token is used automatically.
 
-### Docker (Standalone)
+### Docker (Development / Testing)
 
-```yaml
-services:
-  dooropener:
-    image: ghcr.io/sloth-on-meth/dooropener:latest
-    container_name: dooropener
-    environment:
-      - DOOROPENER_PORT=${DOOROPENER_PORT:-6532}
-      - TZ=${TZ:-UTC}
-      - PUID=${PUID:-1000}
-      - PGID=${PGID:-1000}
-      - UMASK=${UMASK:-002}
-      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
-      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-true}
-    ports:
-      - "${DOOROPENER_PORT:-6532}:${DOOROPENER_PORT:-6532}"
-    volumes:
-      - ./options.json:/app/options.json:ro
-      - ./users.json:/app/users.json:rw
-      - ./logs:/app/logs
-    restart: unless-stopped
-```
-
-Steps:
-
-1. `git clone https://github.com/Sloth-on-meth/DoorOpener.git && cd DoorOpener`
-2. `cp options.json.example options.json` and edit it (see [Configuration](#configuration)).
-3. `cp .env.example .env` and adjust values (`TZ`, `PUID`/`PGID`, `FLASK_SECRET_KEY`).
-4. `docker compose up -d`
-
-#### Building Locally
+A `Dockerfile.dev` is provided for local testing outside Home Assistant:
 
 ```bash
-docker build -t dooropener:latest .
-docker run -d --env-file .env \
+docker build -f Dockerfile.dev -t dooropener:dev .
+cp options.json.example options.json   # edit as needed
+docker run -d \
   -v $(pwd)/options.json:/app/options.json:ro \
   -v $(pwd)/users.json:/app/users.json:rw \
   -v $(pwd)/logs:/app/logs \
-  -p 6532:6532 dooropener:latest
+  -p 6532:6532 dooropener:dev
+```
+
+Or via Compose:
+
+```bash
+docker compose up -d
 ```
 
 ## Configuration
@@ -278,11 +244,11 @@ Every response includes:
 
 | Module | Responsibility |
 |--------|---------------|
-| `config.py` | Loads `options.json`, exposes all settings as module attributes, timezone handling via `zoneinfo` |
-| `security.py` | `RateLimiter` class (IP / session / global), security headers, bot detection, PIN validation |
-| `ha_client.py` | `HAClient` class wrapping `requests.Session` — dispatches `switch`/`lock`/`input_boolean` services |
-| `users_store.py` | Atomic JSON-based user CRUD with usage tracking |
-| `app.py` | Flask app, route handlers, audit logging |
+| `dooropener/config.py` | Loads `options.json`, exposes all settings as module attributes, timezone handling via `zoneinfo` |
+| `dooropener/security.py` | `RateLimiter` class (IP / session / global), security headers, bot detection, PIN validation |
+| `dooropener/ha_client.py` | `HAClient` class wrapping `requests.Session` — dispatches `switch`/`lock`/`input_boolean` services |
+| `dooropener/users_store.py` | Atomic JSON-based user CRUD with usage tracking |
+| `dooropener/app.py` | Flask app, route handlers, audit logging |
 
 ## Development
 
@@ -334,7 +300,7 @@ The CI pipeline (`.github/workflows/ci.yml`) runs on every push and PR:
 | **Tests** | pytest + pytest-cov | Unit/integration tests, 75 % coverage gate |
 | **Lint** | ruff | Code style and import checks |
 | **Security** | bandit | Static security analysis |
-| **Docker** | docker build | Smoke-test the container image |
+| **Docker** | docker build | Smoke-test the dev container image |
 
 ### Dependabot
 

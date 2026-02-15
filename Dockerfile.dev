@@ -13,16 +13,18 @@ RUN apt-get update \
 WORKDIR /app
 
 # Install dependencies first (better layer caching)
-COPY requirements.txt .
+COPY dooropener/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
-# Copy application code and entrypoint
-COPY . .
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+# Copy application code
+COPY dooropener/app.py dooropener/config.py dooropener/security.py \
+     dooropener/ha_client.py dooropener/users_store.py ./
+COPY dooropener/templates/ ./templates/
+COPY dooropener/static/ ./static/
+COPY dooropener/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 EXPOSE 6532
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-# Use gunicorn with environment variable for port; entrypoint will drop privileges
 CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${DOOROPENER_PORT:-6532} app:app --workers 2 --threads 2 --timeout 60"]

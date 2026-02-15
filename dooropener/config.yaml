@@ -5,7 +5,7 @@ description: >-
   A secure web interface for controlling smart door openers via Home Assistant.
   Features a visual PIN keypad, per-user PINs, battery monitoring, and
   brute-force protection. Supports switch, lock, and input_boolean entities.
-url: https://github.com/Sloth-on-meth/DoorOpener
+url: https://github.com/leonardpitzu/DoorOpener
 arch:
   - aarch64
   - amd64

@@ -1,9 +1,8 @@
 services:
   dooropener:
-    #build:
-    #  context: .
-    #  dockerfile: Dockerfile
-    image: ghcr.io/sloth-on-meth/dooropener:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
     env_file: 
       - .env
     environment:

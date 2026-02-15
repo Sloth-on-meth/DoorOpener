@@ -68,7 +68,7 @@ jobs:
         run: pip install ruff
 
       - name: Run ruff
-        run: ruff check .
+        run: ruff check dooropener/ tests/
 
   security:
     name: Security (bandit)
@@ -85,7 +85,7 @@ jobs:
         run: pip install bandit
 
       - name: Security scan
-        run: bandit -q -r . -x tests || true
+        run: bandit -q -r dooropener/ || true
 
   docker:
     name: Docker build smoke test
@@ -94,4 +94,4 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build Docker image
-        run: docker build -t dooropener:ci .
+        run: docker build -f Dockerfile.dev -t dooropener:ci .

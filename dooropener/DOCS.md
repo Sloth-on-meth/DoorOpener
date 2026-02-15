@@ -7,7 +7,7 @@ A secure web interface for controlling smart door openers via Home Assistant.
 1. Add this repository to your Home Assistant add-on store:
    **Settings → Add-ons → Add-on Store → ⋮ → Repositories** → paste:
    ```
-   https://github.com/Sloth-on-meth/DoorOpener
+   https://github.com/leonardpitzu/DoorOpener
    ```
 2. Find **DoorOpener** in the store and click **Install**.
 3. Configure the add-on (see below) and click **Start**.

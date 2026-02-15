@@ -35,7 +35,7 @@ Add the new `users.json` volume bind and make `config.ini` read-write:
 ```yaml
 services:
   dooropener:
-    image: ghcr.io/sloth-on-meth/dooropener:latest
+    image: ghcr.io/leonardpitzu/dooropener:latest
     volumes:
       - ./config.ini:/app/config.ini:rw  # ⚠️ Changed from :ro to :rw
       - ./users.json:/app/users.json    # 🆕 New volume for user data

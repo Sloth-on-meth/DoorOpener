@@ -10,8 +10,8 @@ import tempfile
 
 import pytest
 
-# Add project root to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# Add dooropener/ package directory to path (app source lives there)
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "dooropener")))
 
 # ---------------------------------------------------------------------------
 # Build temp options.json and set env vars BEFORE any app/config imports
