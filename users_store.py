@@ -20,7 +20,7 @@ class UsersStore:
           "alice": {"pin": "1234", "active": true, "created_at": "...", "updated_at": "...", "last_used_at": null}
         }
       }
-    - Effective PINs: merge base_pins (from config.ini [pins]) with overrides/additions in JSON.
+    - Effective PINs: merge base_pins (hardcoded dict) with overrides/additions in JSON.
       If a username exists in JSON, it takes precedence (including active flag).
       Users only present in base_pins are considered active.
     """
