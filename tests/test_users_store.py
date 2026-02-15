@@ -3,7 +3,7 @@ import json
 import os
 import tempfile
 from unittest.mock import patch
-from datetime import datetime
+from datetime import datetime, timezone
 
 from users_store import UsersStore, _now_iso
 
@@ -219,8 +219,8 @@ def test_now_iso_format():
     assert isinstance(parsed, datetime)
 
     # Should be recent (within last minute)
-    now = datetime.utcnow()
-    diff = abs((now - parsed.replace(tzinfo=None)).total_seconds())
+    now = datetime.now(timezone.utc)
+    diff = abs((now - parsed).total_seconds())
     assert diff < 60
 
 
