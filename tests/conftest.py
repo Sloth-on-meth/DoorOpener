@@ -1,79 +1,74 @@
-"""Pytest configuration and fixtures for DoorOpener tests."""
+"""Pytest configuration and fixtures for DoorOpener tests.
+
+Creates a temporary options.json BEFORE any app imports so that config.py
+(and hence app.py) loads test values.
+"""
+import json
 import os
 import sys
-import json
-import pytest
-from unittest.mock import patch, MagicMock
+import tempfile
 
-# Add parent directory to path
+import pytest
+
+# Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# Test Configuration
-TEST_CONFIG = {
-    "pins": {"test_user": "1234", "admin": "admin123"},
-    "admin": {"admin_password": "testpass"},
-    "server": {"test_mode": "true", "port": "5000"},
-    "HomeAssistant": {
-        "url": "http://test-ha:8123",
-        "token": "test-token",
-        "switch_entity": "switch.test_door",
-        "battery_entity": "sensor.test_door_battery",
-    },
+# ---------------------------------------------------------------------------
+# Build temp options.json and set env vars BEFORE any app/config imports
+# ---------------------------------------------------------------------------
+TEST_OPTIONS = {
+    "ha_url": "http://test-ha:8123",
+    "ha_token": "test-token",
+    "entity_id": "switch.test_door",
+    "battery_entity": "sensor.test_door_battery",
+    "port": 6532,
+    "test_mode": True,
+    "admin_password": "testpass",
+    "max_attempts": 5,
+    "block_time_minutes": 5,
+    "max_global_attempts_per_hour": 50,
+    "session_max_attempts": 3,
+    "secret_key": "test-secret-key-fixed",
+    "session_cookie_secure": False,
+    "ca_bundle": "",
 }
 
+_tmp_dir = tempfile.mkdtemp(prefix="dooropener_test_")
+_opts_path = os.path.join(_tmp_dir, "options.json")
+with open(_opts_path, "w") as _f:
+    json.dump(TEST_OPTIONS, _f)
 
-class MockResponse:
-    """Mock response for requests.get()."""
+os.environ["DOOROPENER_OPTIONS_PATH"] = _opts_path
+os.environ["DOOROPENER_LOG_DIR"] = os.path.join(_tmp_dir, "logs")
+os.environ["USERS_STORE_PATH"] = os.path.join(_tmp_dir, "users.json")
 
-    def __init__(self, status_code=200, json_data=None, text=None):
-        self.status_code = status_code
-        self._json = json_data or {}
-        self.text = text or json.dumps(json_data) if json_data else ""
 
-    def json(self):
-        return self._json
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def client():
+    """Flask test client."""
+    import app as app_module
+
+    app_module.app.config["TESTING"] = True
+    with app_module.app.test_client() as c:
+        with app_module.app.app_context():
+            yield c
 
 
 @pytest.fixture(autouse=True)
-def setup_mocks():
-    """Setup common mocks for all tests."""
-    with patch("configparser.ConfigParser") as mock_config:
-        mock_config.return_value = MagicMock()
-        mock_config.return_value.has_section.return_value = True
-        mock_config.return_value.get.side_effect = lambda s, k, **kw: (
-            TEST_CONFIG.get(s, {}).get(k, kw.get("fallback"))
-        )
-        mock_config.return_value.items.return_value = TEST_CONFIG["pins"].items()
-        mock_config.return_value.getboolean.side_effect = lambda s, k, **kw: (
-            str(TEST_CONFIG.get(s, {}).get(k, "")).lower() == "true"
-        )
-        mock_config.return_value.getint.side_effect = lambda s, k, **kw: int(
-            TEST_CONFIG.get(s, {}).get(k, kw.get("fallback", "0"))
-        )
-        yield
+def reset_state():
+    """Reset rate-limiter state and user_pins between tests."""
+    import app as app_module
 
-
-@pytest.fixture
-def client():
-    """Create test client with test configuration."""
-    import tempfile
-
-    # Ensure test logs do not pollute repo logs
-    os.environ["DOOROPENER_LOG_DIR"] = tempfile.mkdtemp(prefix="dooropener_test_logs_")
-
-    from app import app as flask_app
-
-    flask_app.config.update(
-        TESTING=True,
-        SECRET_KEY="test-secret-key",
-        RATE_LIMIT=50,
-        RATE_LIMIT_WINDOW=3600,
-    )
-
-    # Reset rate limit counter
-    if hasattr(flask_app, "rate_limit_counter"):
-        flask_app.rate_limit_counter = {}
-
-    with flask_app.test_client() as client:
-        with flask_app.app_context():
-            yield client
+    app_module.rate_limiter.ip_failed.clear()
+    app_module.rate_limiter.ip_blocked_until.clear()
+    app_module.rate_limiter.session_failed.clear()
+    app_module.rate_limiter.session_blocked_until.clear()
+    app_module.rate_limiter.global_failed = 0
+    app_module.rate_limiter.global_last_reset = app_module.get_current_time()
+    app_module.user_pins.clear()
+    # Reset test_mode to True (options.json default)
+    app_module.test_mode = True
+    yield

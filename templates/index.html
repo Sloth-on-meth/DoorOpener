@@ -502,23 +502,6 @@
             <button id="submitBtn" class="keypad-btn submit-btn" data-action="submit">✓</button>
         </div>
 
-        {% if oidc_enabled %}
-        <div style="width: 280px; margin: 0 auto 0.5rem auto; text-align:center;">
-            <a href="/login" id="ssoLoginBtn"
-                style="display:inline-block; padding:10px 16px; border-radius:8px; background: linear-gradient(135deg, #1976d2, #1565c0); color:#fff; text-decoration:none; font-weight:600;">Login
-                with SSO</a>
-            <button id="ssoOpenBtn" onclick="openDoorWithSSO()"
-                style="display:none; margin-left:8px; padding:10px 16px; border-radius:8px; background: linear-gradient(135deg, #4CAF50, #45a049); color:#fff; border:none; font-weight:600;">Open
-                with SSO</button>
-        </div>
-        {% endif %}
-
-        <!-- Logout button for OIDC -->
-        <button onclick="window.location.href='/oidc/logout'" id="ssoLogoutBtn"
-            style="display:none; margin-left:8px; padding: 10px 16px; border-radius: 8px; background: linear-gradient(135deg, #e53935, #d32f2f); color: #fff; font-weight: 600; text-align: center; margin-top: 1rem; border: none; cursor: pointer;">
-            Logout
-        </button>
-
     </div>
     <div id="toast-container"></div>
 
@@ -628,19 +611,12 @@
             }
         }
 
-        let authStatus = { oidc_enabled: false, oidc_authenticated: false, require_pin_for_oidc: true };
-
         function openDoor() {
             const pin = currentPin;
 
-            // If OIDC is authenticated and PIN is not required, allow pinless open
             if (!pin) {
-                if (authStatus.oidc_enabled && authStatus.oidc_authenticated && !authStatus.require_pin_for_oidc) {
-                    return openDoorWithSSO();
-                } else {
-                    showStatus('Please enter a PIN', 'error');
-                    return;
-                }
+                showStatus('Please enter a PIN', 'error');
+                return;
             }
 
             if (isSubmitting) return; // Prevent concurrent submissions
@@ -702,49 +678,6 @@
 
                         currentPin = '';
                         updatePinDisplay();
-                        isSubmitting = false;
-                    }, 1200);
-                });
-        }
-
-        function openDoorWithSSO() {
-            if (isSubmitting) return;
-            isSubmitting = true;
-            if (autoSubmitTimer) { clearTimeout(autoSubmitTimer); autoSubmitTimer = null; }
-            // No PIN payload; rely on server-side OIDC session
-            fetch('/open-door', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'same-origin',
-                cache: 'no-store',
-                body: JSON.stringify({})
-            })
-                .then(response => response.json().then(data => ({ status: response.status, data })))
-                .then(({ status, data }) => {
-                    if (status === 200 && data.status === 'success') {
-                        showStatus('Success: ' + data.message, 'success');
-                        playSuccessSound();
-                        showAccessGrantedPopup();
-                        if (window.navigator.vibrate) window.navigator.vibrate([50, 30, 150, 50, 80, 30, 200]);
-                    } else {
-                        if ((status === 429 || status === 401) && data && data.blocked_until) {
-                            startBlockCountdown(data.blocked_until);
-                        }
-                        showStatus('Error: ' + (data && data.message ? data.message : 'Unknown error'), 'error');
-                        const submitBtn = document.getElementById('submitBtn');
-                        submitBtn.style.background = 'linear-gradient(135deg, #dc3545, #c82333)';
-                        submitBtn.textContent = '✗';
-                        playFailureSound();
-                        showAccessDeniedPopup();
-                        if (window.navigator.vibrate) window.navigator.vibrate([200, 100, 200, 100, 300]);
-                    }
-                })
-                .catch(() => showStatus('Error: Could not connect to server', 'error'))
-                .finally(() => {
-                    setTimeout(() => {
-                        const submitBtn = document.getElementById('submitBtn');
-                        submitBtn.style.background = 'linear-gradient(135deg, #4CAF50, #45a049)';
-                        submitBtn.textContent = '✓';
                         isSubmitting = false;
                     }, 1200);
                 });
@@ -966,30 +899,6 @@
             }
             // Initial battery level fetch
             fetchBatteryLevel();
-
-            // Query authentication status for OIDC UX
-            fetch('/auth/status', { credentials: 'same-origin', cache: 'no-store' })
-                .then(r => r.json())
-                .then(s => {
-                    authStatus = s || authStatus;
-                    const loginBtn = document.getElementById('ssoLoginBtn');
-                    const openBtn = document.getElementById('ssoOpenBtn');
-                    const logoutBtn = document.getElementById('ssoLogoutBtn'); // Logout button
-
-                    if (loginBtn && openBtn && logoutBtn) {
-                        if (authStatus.oidc_enabled && authStatus.oidc_authenticated) {
-                            loginBtn.style.display = 'none';
-                            logoutBtn.style.display = 'block'; // Show Logout button
-                            // Show Open with SSO only when PIN not required
-                            openBtn.style.display = authStatus.require_pin_for_oidc ? 'none' : 'inline-block';
-                        } else {
-                            loginBtn.style.display = authStatus.oidc_enabled ? 'inline-block' : 'none';
-                            openBtn.style.display = 'none';
-                            logoutBtn.style.display = 'none'; // Hide Logout button
-                        }
-                    }
-                })
-                .catch(() => { });
 
             // Initialize PIN display
             updatePinDisplay();

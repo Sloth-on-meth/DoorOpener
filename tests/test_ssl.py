@@ -1,4 +1,9 @@
-from unittest.mock import MagicMock
+"""SSL / CA-bundle tests.
+
+With the new architecture, verify is set on ha_client.session, so we test
+the Session.verify attribute directly rather than capturing keyword args.
+"""
+from unittest.mock import MagicMock, patch
 
 
 def _std_headers():
@@ -10,107 +15,54 @@ def _std_headers():
 
 
 def test_verify_defaults_to_true_without_ca_bundle(client, monkeypatch):
-    # Arrange: no ca_bundle configured; app should use verify=True
     import app as app_module
-
-    # Ensure no custom bundle
-    monkeypatch.setattr(app_module, "ha_ca_bundle", "")
-
-    captured = {}
-
-    def fake_get(url, headers=None, timeout=None, verify=None):
-        captured["verify"] = verify
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.json.return_value = {"state": "95"}
-        return resp
-
-    monkeypatch.setattr("requests.get", fake_get)
-
-    # Act
-    r = client.get("/battery")
-
-    # Assert
+    app_module.ha_client.session.verify = True
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"state": "95"}
+    with patch.object(app_module.ha_client.session, "get", return_value=mock_resp):
+        r = client.get("/battery")
     assert r.status_code == 200
-    assert captured.get("verify") is True
+    assert app_module.ha_client.session.verify is True
 
 
 def test_verify_uses_ca_bundle_when_set(client, monkeypatch):
-    # Arrange: set a custom CA bundle path
     import app as app_module
-
     ca_path = "/etc/dooropener/ha-ca.pem"
-    monkeypatch.setattr(app_module, "ha_ca_bundle", ca_path)
-
-    captured = {}
-
-    def fake_get(url, headers=None, timeout=None, verify=None):
-        captured["verify"] = verify
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.json.return_value = {"state": "88"}
-        return resp
-
-    monkeypatch.setattr("requests.get", fake_get)
-
-    # Act
-    r = client.get("/battery")
-
-    # Assert
+    app_module.ha_client.session.verify = ca_path
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"state": "88"}
+    with patch.object(app_module.ha_client.session, "get", return_value=mock_resp):
+        r = client.get("/battery")
     assert r.status_code == 200
-    assert captured.get("verify") == ca_path
+    assert app_module.ha_client.session.verify == ca_path
 
 
 def test_post_verify_defaults_to_true_without_ca_bundle(client, monkeypatch):
-    # Arrange
     import app as app_module
-
     app_module.test_mode = False
     app_module.user_pins["alice"] = "1234"
-    monkeypatch.setattr(app_module, "ha_ca_bundle", "")
-
-    captured = {}
-
-    def fake_post(url, headers=None, json=None, timeout=None, verify=None):
-        captured["verify"] = verify
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.raise_for_status = lambda: None
-        return resp
-
-    monkeypatch.setattr("requests.post", fake_post)
-
-    # Act
-    r = client.post("/open-door", json={"pin": "1234"}, headers=_std_headers())
-
-    # Assert
+    app_module.ha_client.session.verify = True
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.raise_for_status = lambda: None
+    with patch.object(app_module.ha_client.session, "post", return_value=mock_resp):
+        r = client.post("/open-door", json={"pin": "1234"}, headers=_std_headers())
     assert r.status_code == 200
-    assert captured.get("verify") is True
+    assert app_module.ha_client.session.verify is True
 
 
 def test_post_verify_uses_ca_bundle_when_set(client, monkeypatch):
-    # Arrange
     import app as app_module
-
     app_module.test_mode = False
     app_module.user_pins["bob"] = "5678"
     ca_path = "/etc/dooropener/ha-ca.pem"
-    monkeypatch.setattr(app_module, "ha_ca_bundle", ca_path)
-
-    captured = {}
-
-    def fake_post(url, headers=None, json=None, timeout=None, verify=None):
-        captured["verify"] = verify
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.raise_for_status = lambda: None
-        return resp
-
-    monkeypatch.setattr("requests.post", fake_post)
-
-    # Act
-    r = client.post("/open-door", json={"pin": "5678"}, headers=_std_headers())
-
-    # Assert
+    app_module.ha_client.session.verify = ca_path
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.raise_for_status = lambda: None
+    with patch.object(app_module.ha_client.session, "post", return_value=mock_resp):
+        r = client.post("/open-door", json={"pin": "5678"}, headers=_std_headers())
     assert r.status_code == 200
-    assert captured.get("verify") == ca_path
+    assert app_module.ha_client.session.verify == ca_path

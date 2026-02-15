@@ -1,17 +1,17 @@
+"""Route-level behaviour tests: service worker, manifest, CSP, counters."""
 from datetime import timedelta
 
 
 def test_service_worker_endpoint(client):
     r = client.get("/service-worker.js")
-    assert r.status_code in (200, 404)  # optional in some setups
+    assert r.status_code in (200, 404)
     if r.status_code == 200:
-        # Flask sets mimetype explicitly to application/javascript
         assert "javascript" in (r.mimetype or "")
 
 
 def test_manifest_endpoint(client):
     r = client.get("/manifest.webmanifest")
-    assert r.status_code in (200, 404)  # optional in some setups
+    assert r.status_code in (200, 404)
     if r.status_code == 200:
         assert "application/manifest+json" in (r.mimetype or "")
 
@@ -27,27 +27,17 @@ def test_csp_directives_on_index(client):
 
 
 def test_delay_function_values():
-    import app as app_module
-
-    expected = {
-        0: 0,  # no attempts yet
-        1: 1,
-        2: 2,
-        3: 4,
-        4: 8,
-        5: 16,
-        6: 16,  # capped at 16
-    }
+    from security import get_delay_seconds
+    expected = {0: 0, 1: 1, 2: 2, 3: 4, 4: 8, 5: 16, 6: 16}
     for attempts, delay in expected.items():
-        assert app_module.get_delay_seconds(attempts) == delay
+        assert get_delay_seconds(attempts) == delay
 
 
 def test_counters_reset_on_success_after_no_block(client, monkeypatch):
     import app as app_module
-
-    # Fix identifiers so we can inspect counters
     monkeypatch.setattr(
-        app_module, "get_client_identifier", lambda: ("2.2.2.2", "sessReset", "idReset")
+        "app.get_client_identifier",
+        lambda: ("2.2.2.2", "sessReset", "idReset"),
     )
     app_module.user_pins["ok"] = "9999"
     app_module.test_mode = True
@@ -58,13 +48,11 @@ def test_counters_reset_on_success_after_no_block(client, monkeypatch):
         "Content-Type": "application/json",
     }
 
-    # One failing attempt (wrong pin) should bump counters
     r1 = client.post("/open-door", json={"pin": "0000"}, headers=headers)
     assert r1.status_code in (401, 429)
 
-    # Now a success attempt should reset counters and clear blocks
     r2 = client.post("/open-door", json={"pin": "9999"}, headers=headers)
-    assert r2.status_code in (200, 502, 500)  # HA may be unreachable in CI
+    assert r2.status_code in (200, 502, 500)
 
     assert app_module.ip_failed_attempts["idReset"] == 0
     assert app_module.session_failed_attempts["sessReset"] == 0
@@ -80,18 +68,18 @@ def test_counters_reset_on_success_after_no_block(client, monkeypatch):
 
 def test_counters_not_reset_on_success_when_block_active(client, monkeypatch):
     import app as app_module
+    from config import get_current_time
 
-    # Fix identifiers
     monkeypatch.setattr(
-        app_module, "get_client_identifier", lambda: ("3.3.3.3", "sessBlock", "idBlock")
+        "app.get_client_identifier",
+        lambda: ("3.3.3.3", "sessBlock", "idBlock"),
     )
     app_module.user_pins["ok2"] = "1111"
     app_module.test_mode = True
 
-    # Apply active in-memory session block
-    app_module.session_blocked_until[
+    app_module.rate_limiter.session_blocked_until[
         "sessBlock"
-    ] = app_module.get_current_time() + timedelta(seconds=30)
+    ] = get_current_time() + timedelta(seconds=30)
 
     headers = {
         "User-Agent": "pytest-client/1.0 (+https://example.test)",
@@ -102,8 +90,9 @@ def test_counters_not_reset_on_success_when_block_active(client, monkeypatch):
     r = client.post("/open-door", json={"pin": "1111"}, headers=headers)
     assert r.status_code == 429
 
-    # Counters must not be reset during active block
-    assert app_module.ip_failed_attempts.get("idBlock", 0) == 0
-    assert app_module.session_failed_attempts.get("sessBlock", 0) == 0
-    # Block must still be present
-    assert app_module.session_blocked_until["sessBlock"] > app_module.get_current_time()
+    assert app_module.rate_limiter.ip_failed.get("idBlock", 0) == 0
+    assert app_module.rate_limiter.session_failed.get("sessBlock", 0) == 0
+    assert (
+        app_module.rate_limiter.session_blocked_until["sessBlock"]
+        > get_current_time()
+    )

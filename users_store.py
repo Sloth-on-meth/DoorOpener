@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 
@@ -8,8 +8,7 @@ ISO_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 
 
 def _now_iso() -> str:
-    # naive datetime.isoformat() is fine; app already logs timezone-aware timestamps elsewhere
-    return datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 class UsersStore:
@@ -30,9 +29,6 @@ class UsersStore:
         self.path = path
         self.data: Dict[str, Any] = {"users": {}}
         self._loaded = False
-
-    def _ensure_loaded(self) -> None:
-        self._load_file()
 
     def _load_file(self) -> None:
         if self._loaded:
@@ -96,7 +92,7 @@ class UsersStore:
             items.append(item)
         return {"users": items}
 
-    def _ensure_loaded(self):
+    def _ensure_loaded(self) -> None:
         if not self._loaded:
             self._load_file()
 

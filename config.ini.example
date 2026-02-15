@@ -38,34 +38,3 @@ block_time_minutes = 5
 max_global_attempts_per_hour = 50
 # Maximum failed attempts per session before blocking
 session_max_attempts = 3
-
-[oidc]
-# Enable in-app OIDC login via Authentik (true/false)
-enabled = false
-
-# Authentik issuer URL (base), e.g. https://auth.example.com/application/o/dooropener
-# The well-known configuration will be discovered at: {issuer}/.well-known/openid-configuration
-issuer = https://auth.example.com/application/o/dooropener
-
-# OIDC client credentials from Authentik Application
-client_id = your_client_id
-client_secret = your_client_secret
-
-# Redirect URI registered in Authentik (must match exactly)
-# Example for local dev: http://localhost:6532/oidc/callback
-redirect_uri = http://localhost:6532/oidc/callback
-
-# Optional: require this Authentik group to access admin dashboard
-# Leave empty to allow any authenticated user
-admin_group = dooropener-admins
-
-# Optional: group allowed to open the door via OIDC (no PIN)
-# Leave empty to allow any authenticated user to open the door
-user_group = dooropener-users
-
-# If true, even OIDC users must enter a PIN; if false, OIDC users can open without PIN
-require_pin_for_oidc = false
-
-# Optional: PEM-encoded public key to validate ID token signatures locally
-# Not required if your environment relies on dynamic JWKS validation via your proxy/outpost
-public_key = 

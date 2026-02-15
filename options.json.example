@@ -1,0 +1,16 @@
+{
+    "ha_url": "http://homeassistant.local:8123",
+    "ha_token": "your_long_lived_access_token_here",
+    "entity_id": "switch.dooropener_zigbee",
+    "battery_entity": "sensor.dooropener_zigbee_battery",
+    "port": 6532,
+    "test_mode": false,
+    "admin_password": "change_me_please",
+    "max_attempts": 5,
+    "block_time_minutes": 5,
+    "max_global_attempts_per_hour": 50,
+    "session_max_attempts": 3,
+    "secret_key": "",
+    "session_cookie_secure": false,
+    "ca_bundle": ""
+}
