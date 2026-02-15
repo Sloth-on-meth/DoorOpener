@@ -1,5 +1,5 @@
-#!/usr/bin/with-contenv bash
-# s6-overlay service script for DoorOpener.
+#!/usr/bin/env bash
+# Home Assistant add-on entry point for DoorOpener.
 # HA Supervisor writes user config to /data/options.json automatically.
 
 export DOOROPENER_OPTIONS_PATH="/data/options.json"

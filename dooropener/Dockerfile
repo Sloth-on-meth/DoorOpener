@@ -16,6 +16,9 @@ COPY app.py config.py security.py ha_client.py users_store.py ./
 COPY templates/ ./templates/
 COPY static/ ./static/
 
-# s6-overlay service: place run script where the init system expects it
-COPY run.sh /etc/services.d/dooropener/run
-RUN chmod +x /etc/services.d/dooropener/run
+# Bypass s6-overlay init — single-process add-on doesn't need it
+COPY run.sh /
+RUN chmod +x /run.sh
+
+ENTRYPOINT []
+CMD ["/run.sh"]
