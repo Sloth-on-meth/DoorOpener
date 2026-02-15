@@ -1,0 +1,55 @@
+name: DoorOpener
+version: "2.0.0"
+slug: dooropener
+description: >-
+  A secure web interface for controlling smart door openers via Home Assistant.
+  Features a visual PIN keypad, per-user PINs, battery monitoring, and
+  brute-force protection. Supports switch, lock, and input_boolean entities.
+url: https://github.com/Sloth-on-meth/DoorOpener
+arch:
+  - aarch64
+  - amd64
+  - armv7
+startup: application
+boot: auto
+ingress: true
+ingress_port: 6532
+panel_icon: mdi:door
+panel_title: DoorOpener
+homeassistant_api: true
+ports:
+  6532/tcp: 6532
+ports_description:
+  6532/tcp: DoorOpener web interface
+map:
+  - config:rw
+options:
+  ha_url: "http://supervisor/core"
+  ha_token: ""
+  entity_id: "switch.dooropener"
+  battery_entity: ""
+  port: 6532
+  test_mode: false
+  admin_password: ""
+  max_attempts: 5
+  block_time_minutes: 5
+  max_global_attempts_per_hour: 50
+  session_max_attempts: 3
+  secret_key: ""
+  session_cookie_secure: false
+  ca_bundle: ""
+schema:
+  ha_url: url
+  ha_token: str
+  entity_id: str
+  battery_entity: str?
+  port: port
+  test_mode: bool
+  admin_password: password
+  max_attempts: "int(1,100)"
+  block_time_minutes: "int(1,60)"
+  max_global_attempts_per_hour: "int(1,1000)"
+  session_max_attempts: "int(1,50)"
+  secret_key: str?
+  session_cookie_secure: bool
+  ca_bundle: str?

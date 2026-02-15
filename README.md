@@ -41,7 +41,21 @@ DoorOpener provides a web-based keypad interface to remotely open doors connecte
 
 ## Quick Start
 
-### Docker (Recommended)
+### Home Assistant Add-on (Recommended)
+
+1. In Home Assistant go to **Settings → Add-ons → Add-on Store → ⋮ → Repositories**
+2. Paste the repository URL:
+   ```
+   https://github.com/Sloth-on-meth/DoorOpener
+   ```
+3. Find **DoorOpener** in the store and click **Install**
+4. Configure `entity_id` and `admin_password` in the add-on options
+5. Click **Start** — the panel appears in the sidebar with a door icon
+
+> When running as an add-on you can leave `ha_url` and `ha_token` empty — the
+> Supervisor API token is used automatically.
+
+### Docker (Standalone)
 
 ```yaml
 services:

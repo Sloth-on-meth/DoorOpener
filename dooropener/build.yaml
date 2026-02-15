@@ -1,0 +1,10 @@
+build_from:
+  aarch64: ghcr.io/sloth-on-meth/dooropener:latest
+  amd64: ghcr.io/sloth-on-meth/dooropener:latest
+  armv7: ghcr.io/sloth-on-meth/dooropener:latest
+labels:
+  org.opencontainers.image.title: DoorOpener
+  org.opencontainers.image.description: >-
+    Secure web interface for controlling smart door openers via Home Assistant
+  org.opencontainers.image.source: https://github.com/Sloth-on-meth/DoorOpener
+  org.opencontainers.image.licenses: MIT
