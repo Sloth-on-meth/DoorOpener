@@ -1,37 +1,24 @@
-# 🚨 !MAJOR CHANGE! - v1.10.0 User Management Migration
+# DoorOpener
 
-> **⚠️ BREAKING CHANGE**: Starting with v1.10.0, user management has been completely redesigned with a new JSON-based user store. **Existing users in `config.ini` [pins] section need to be migrated!**
-
-see the CHANGELOG.MD for instructions
+A secure web interface for controlling smart door openers via Home Assistant. Features a modern glass-morphism UI with visual keypad, per-user PINs, audio feedback, battery monitoring, and comprehensive brute-force protection.
 
 [![CI](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/ci.yml)
 [![Docker Build](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/docker-build.yml/badge.svg?branch=main)](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/docker-build.yml)
-![Version 1.10.0](https://img.shields.io/badge/version-1.10.0-blue?style=flat-square)
-
-<details>
-  <summary><strong>🚨 Help Wanted: Security / HA Addon (please expand)</strong></summary>
-
-  
-  
-  ### Home Assistant Add-on Needed!
-  **I couldn't figure out how to turn this project into a proper Home Assistant add-on. If you know how, please open a PR!**
-
-  > **Important:** Any add-on solution must not break standalone usage. The project must remain fully usable both as a Home Assistant add-on _and_ as a standalone app (Docker).
-
-  ### Security audit needed!
-  > I’ve implemented an OIDC setup with some security measures in place, but I’m not fully confident in how robust the implementation is. I’d really appreciate someone with experience taking a look and providing feedback on potential improvements.
-
-</details>
+![Version](https://img.shields.io/badge/version-2.0.0-blue?style=flat-square)
+![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue?style=flat-square)
 
 ---
 
-# 🚪 DoorOpener
+<details>
+  <summary><strong>Help Wanted: Home Assistant Add-on</strong></summary>
 
-A pretty web interface for controlling smart door openers via Home Assistant. Features a modern glass-morphism UI with visual keypad, per-user PINs, audio feedback, battery monitoring, and comprehensive security.
+  ### Home Assistant Add-on Needed!
+  If you know how to package this as a proper Home Assistant add-on, please open a PR!
 
+  > **Important:** Any add-on solution must not break standalone usage. The project must remain fully usable both as a Home Assistant add-on _and_ as a standalone app (Docker).
+</details>
 
-
-
+---
 
 <img width="2554" height="1187" alt="image" src="https://github.com/user-attachments/assets/e9e2fd6c-aa32-4ea1-933f-668fad3fbfc4" />
 
@@ -39,24 +26,22 @@ A pretty web interface for controlling smart door openers via Home Assistant. Fe
 
 ## What It Does
 
-DoorOpener provides a web-based keypad interface to remotely open doors connected to Home Assistant. Users enter their personal PIN on a visual keypad or login with SSO, and the system securely communicates with Home Assistant to trigger the door opener.
+DoorOpener provides a web-based keypad interface to remotely open doors connected to Home Assistant. Users enter their personal PIN on a visual keypad and the system securely communicates with Home Assistant to trigger the door opener.
 
 **Key Features:**
-- Visual 3x4 keypad interface with auto-submit
+
+- Visual 3×4 keypad interface with auto-submit
 - Individual PINs for each user with JSON-based user management
 - Audio feedback (success chimes, failure sounds)
 - Real-time battery monitoring for Zigbee devices
 - Multi-layer security with rate limiting and IP blocking
-- **NEW**: Complete admin UI with user management and migration tools
-- **NEW**: Toast notifications and modern responsive design
+- Admin UI with user management and log viewer
 - Test mode for safe development
-- **Supports Home Assistant `switch`, `lock`, and `input_boolean` entities**
+- Supports Home Assistant `switch`, `lock`, and `input_boolean` entities
 
 ## Quick Start
 
 ### Docker (Recommended)
-
-Use Docker Compose (recommended). It handles environment, volumes, and permissions cleanly.
 
 ```yaml
 services:
@@ -74,300 +59,276 @@ services:
     ports:
       - "${DOOROPENER_PORT:-6532}:${DOOROPENER_PORT:-6532}"
     volumes:
-      - ./config.ini:/app/config.ini:ro
+      - ./options.json:/app/options.json:ro
+      - ./users.json:/app/users.json:rw
       - ./logs:/app/logs
     restart: unless-stopped
 ```
 
 Steps:
+
 1. `git clone https://github.com/Sloth-on-meth/DoorOpener.git && cd DoorOpener`
-2. `cp config.ini.example config.ini` and edit it.
-3. `cp .env.example .env` and adjust values (TZ, PUID/PGID, etc.).
+2. `cp options.json.example options.json` and edit it (see [Configuration](#configuration)).
+3. `cp .env.example .env` and adjust values (`TZ`, `PUID`/`PGID`, `FLASK_SECRET_KEY`).
 4. `docker compose up -d`
 
-#### Building Locally (Optional)
-If you want to build the image yourself:
+#### Building Locally
+
 ```bash
 docker build -t dooropener:latest .
-docker run -d --env-file .env -v $(pwd)/config.ini:/app/config.ini:ro -v $(pwd)/logs:/app/logs -p 6532:6532 dooropener:latest
+docker run -d --env-file .env \
+  -v $(pwd)/options.json:/app/options.json:ro \
+  -v $(pwd)/users.json:/app/users.json:rw \
+  -v $(pwd)/logs:/app/logs \
+  -p 6532:6532 dooropener:latest
 ```
-
- 
-
-
-<!--
-#### Using the public ghcr.io image
-
-(Registry-based deployment is currently disabled)
--->
-
 
 ## Configuration
 
-### Environment Variables (.env file)
+### `options.json` (primary config)
+
+All application settings live in a single `options.json` file. Copy the example and edit:
 
 ```bash
-# Port configuration (optional, defaults to 6532)
+cp options.json.example options.json
+```
+
+```json
+{
+  "ha_url": "http://homeassistant.local:8123",
+  "ha_token": "your_long_lived_access_token_here",
+  "entity_id": "switch.dooropener_zigbee",
+  "battery_entity": "sensor.dooropener_zigbee_battery",
+  "port": 6532,
+  "test_mode": false,
+  "admin_password": "change_me_please",
+  "max_attempts": 5,
+  "block_time_minutes": 5,
+  "max_global_attempts_per_hour": 50,
+  "session_max_attempts": 3,
+  "secret_key": "",
+  "session_cookie_secure": false,
+  "ca_bundle": ""
+}
+```
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `ha_url` | Home Assistant base URL | _(required)_ |
+| `ha_token` | Long-lived access token (HA → Profile → Security) | _(required)_ |
+| `entity_id` | Entity to trigger (`switch.*`, `lock.*`, or `input_boolean.*`) | _(required)_ |
+| `battery_entity` | Battery sensor entity for monitoring | auto-derived |
+| `port` | Web server port (overridden by `DOOROPENER_PORT` env var) | `6532` |
+| `test_mode` | When `true`, simulates door actions without calling HA | `false` |
+| `admin_password` | Password for the admin dashboard | _(required)_ |
+| `max_attempts` | Failed PIN attempts per IP before blocking | `5` |
+| `block_time_minutes` | Block duration in minutes | `5` |
+| `max_global_attempts_per_hour` | Global rate limit across all clients | `50` |
+| `session_max_attempts` | Failed attempts per browser session before blocking | `3` |
+| `secret_key` | Flask secret key (leave empty + set `FLASK_SECRET_KEY` env var instead) | `""` |
+| `session_cookie_secure` | Set `true` when running behind HTTPS | `false` |
+| `ca_bundle` | Path to a custom CA bundle (PEM) for self-signed HA certificates | `""` |
+
+### Environment Variables (`.env` file)
+
+```bash
+# Port (optional, overrides options.json)
 DOOROPENER_PORT=6532
 
-# Timezone (optional, defaults to UTC)
+# Timezone
 TZ=Europe/Amsterdam
 
-# Map the runtime user/group inside the container to your host user
-# Helps the app write to ./logs without manual chown
+# Container user/group mapping (linuxserver-style)
 PUID=1000
 PGID=1000
-
-# Default permissions for created files/dirs
 UMASK=002
 
-# Security/session settings (strongly recommended in production)
+# Flask session secret (recommended for production)
 FLASK_SECRET_KEY=please-change-me
-# When running behind HTTPS (reverse proxy), leave as true
-# For local HTTP testing only, set to false so cookies are sent
+
+# Set true when behind HTTPS reverse proxy
 SESSION_COOKIE_SECURE=true
 ```
 
-### PUID/PGID and permissions (linuxserver-style)
+**Configuration priority:** Environment variables > `options.json` defaults.
 
-This image supports `PUID`, `PGID` and `UMASK` to avoid host-side chown. On startup, the entrypoint aligns the runtime user/group to those IDs and ensures `/app/logs` is writable, then drops privileges. Keep `config.ini` mounted read-only and bind `./logs` to persist logs.
+### PUID/PGID and Permissions
+
+The image supports `PUID`, `PGID`, and `UMASK` to avoid host-side `chown`. On startup the entrypoint aligns the runtime user/group to those IDs, ensures `/app/logs` is writable, then drops privileges via `gosu`.
 
 ### Logs
 
-- Application access logs: `/app/logs/log.txt` (bind mount `./logs:/app/logs`)
-- Gunicorn/access output: container stdout/stderr (visible via `docker logs`)
+| Log | Location |
+|-----|----------|
+| Door access / audit log | `/app/logs/log.txt` (bind-mount `./logs:/app/logs`) |
+| Gunicorn / access log | Container stdout/stderr (`docker logs dooropener`) |
 
-### Application Config (config.ini)
+## Self-Signed Certificates (Home Assistant)
 
-```ini
-[HomeAssistant]
-url = http://homeassistant.local:8123
-token = your_long_lived_access_token
-switch_entity = switch.your_door_opener
+If your Home Assistant uses a self-signed certificate, provide a custom CA bundle:
 
-# Optional: trust a custom CA bundle (PEM) for HTTPS to Home Assistant
-# Example: /etc/dooropener/ha-ca.pem
-# If provided and readable, the app verifies TLS using this bundle.
-# If empty/not set, the system trust store is used (default).
-ca_bundle =
+### Option 1 — `options.json` (recommended)
 
-[pins]
-# TO BE DEPRECATED: Legacy PIN storage - will be removed in a future version
-# Migrate to JSON store via Admin UI for full management capabilities
-# alice = 1234
-# bob = 5678
-
-[admin]
-admin_password = secure_password
-
-[server]
-# Overridden by DOOROPENER_PORT env var if set
-port = 6532
-# Set to true for testing without opening door
-test_mode = false
-
-[security]
-# Maximum failed attempts per IP before blocking
-max_attempts = 5 
-# Block time in minutes after max attempts reached
-block_time_minutes = 5
-# Maximum global attempts per hour across all users
-max_global_attempts_per_hour = 50
-# Maximum failed attempts per session before blocking
-session_max_attempts = 3
-```
-
-### OIDC (Authentik) — Experimental
-
-> IMPORTANT: This OIDC/Authentik integration is a rudimentary, first-pass implementation. It has not been fully verified end‑to‑end in production. It may not work in your setup. Use at your own risk and please open issues/PRs with fixes.
-
-DoorOpener can optionally integrate with Authentik using in‑app OIDC. When enabled, users can sign in via SSO, and—optionally—open the door without a PIN.
-
-```ini
-[oidc]
-enabled = false                     # Set to true to enable OIDC
-issuer = https://auth.example.com/application/o/dooropener
-client_id = your_client_id
-client_secret = your_client_secret
-redirect_uri = https://your.domain/oidc/callback
-
-# Optional group required for admin dashboard access
-admin_group = dooropener-admins
-
-# Optional group allowed to open the door via OIDC (pinless)
-# Leave empty to allow any authenticated OIDC user
-user_group = dooropener-users
-
-# If true, OIDC users still must enter a PIN (no pinless open)
-require_pin_for_oidc = false
-```
-
-## User Management & Migration
-
-### JSON User Store
-
-DoorOpener v1.10.0+ includes a modern JSON-based user management system alongside the traditional config.ini [pins] section. The JSON store (`users.json`) provides:
-
-- **Full CRUD operations**: Create, edit, delete users via admin UI
-- **User activation/deactivation**: Temporarily disable users without deletion
-- **Persistent storage**: Data survives container restarts via volume binding
-- **Priority system**: JSON store users override config.ini entries
-
-### Migrating from config.ini to JSON Store
-
-**Why migrate?**
-- **Future-proof**: config.ini [pins] will be deprecated and removed in a future version
-- Gain full user management capabilities (edit PINs, activate/deactivate)
-- Modern admin UI with toast notifications and responsive design
-- No need to restart containers when managing users
-- Persistent user data with automatic backups
-
-**Migration Process:**
-
-1. **Access Admin UI**: Navigate to `http://your-server:6532/admin` and login
-2. **Switch to Users Tab**: Click the "👥 Users" tab in the admin dashboard
-3. **Review Config Users**: You'll see existing config.ini users marked as "Config-only"
-4. **Bulk Migration**: Click the "⬇️ Migrate All" button
-5. **Confirm**: Review the migration dialog and click "OK"
-6. **Automatic Process**: 
-   - Users are created in JSON store with existing PINs
-   - Original entries are removed from config.ini
-   - No service interruption or restarts required
-
-**After Migration:**
-- Users appear in the admin UI with full management options
-- Edit PINs, activate/deactivate, or delete users as needed
-- Add new users directly through the "➕ Add User" button
-- All changes are immediate and persistent
-
-**Volume Binding (Important):**
-Ensure your docker-compose.yml includes the users.json volume bind:
+Set `"ca_bundle": "/etc/dooropener/ha-ca.pem"` in `options.json` and mount the file:
 
 ```yaml
-volumes:
-  - ./config.ini:/app/config.ini:rw
-  - ./logs:/app/logs
-  - ./users.json:/app/users.json  # Required for persistence
+services:
+  dooropener:
+    volumes:
+      - ./options.json:/app/options.json:ro
+      - ./certs/ha-ca.pem:/etc/dooropener/ha-ca.pem:ro
 ```
 
-### User Management Features
+### Option 2 — Environment variable
 
-**Admin UI Capabilities:**
-- **Create Users**: Add new users with custom PINs (4-8 digits)
-- **Edit Users**: Modify existing user PINs
-- **Activate/Deactivate**: Temporarily disable users without deletion
-- **Delete Users**: Permanently remove users from the system
-- **View Activity**: See creation dates, last used timestamps
-- **Log Management**: Clear test data or all logs with confirmation
+```yaml
+services:
+  dooropener:
+    environment:
+      - REQUESTS_CA_BUNDLE=/etc/dooropener/ha-ca.pem
+    volumes:
+      - ./certs/ha-ca.pem:/etc/dooropener/ha-ca.pem:ro
+```
 
-**Security Features:**
-- All user management requires admin authentication
-- Changes are logged with timestamps and admin details
-- Atomic operations prevent data corruption
-- Input validation for usernames and PINs
-
-**Best Practices:**
-- Migrate config.ini users early to gain full management capabilities
-- Use descriptive usernames (alphanumeric, underscore, dash, dot allowed)
-- Regularly review user activity via the admin dashboard
-- Use "Clear Test Data" to remove development/testing log entries
-
-Notes:
-- In development over HTTP, set `SESSION_COOKIE_SECURE=false` (env) so the browser sends the session cookie.
-- Set a stable secret across instances via `FLASK_SECRET_KEY` (env) or `[server] secret_key` in `config.ini`.
-- The implementation is minimal and may require adjustments to claims (e.g., `groups`) depending on your Authentik setup.
-
-**Configuration Priority:**
-1. Environment variables (`.env` file) - highest priority
-2. `config.ini` settings
-3. Default values
-
-### Self-signed certificates (Home Assistant)
-
-If your Home Assistant uses a self-signed certificate, the recommended approach is to provide a custom CA bundle (PEM) and have DoorOpener verify TLS against it.
-
-Options:
-
-1. Config-based (recommended)
-
-   - Add `ca_bundle = /etc/dooropener/ha-ca.pem` under `[HomeAssistant]` in `config.ini`.
-   - Mount the file into the container as read-only.
-
-   Docker Compose example:
-
-   ```yaml
-   services:
-     dooropener:
-       volumes:
-         - ./config.ini:/app/config.ini:ro
-         - ./certs/ha-ca.pem:/etc/dooropener/ha-ca.pem:ro
-   ```
-
-2. Environment variable (no code/config change)
-
-   - Set one of these env vars so Python Requests uses your bundle:
-     - `REQUESTS_CA_BUNDLE=/etc/dooropener/ha-ca.pem`
-     - `SSL_CERT_FILE=/etc/dooropener/ha-ca.pem`
-
-   Docker Compose example:
-
-   ```yaml
-   services:
-     dooropener:
-       environment:
-         - REQUESTS_CA_BUNDLE=/etc/dooropener/ha-ca.pem
-       volumes:
-         - ./certs/ha-ca.pem:/etc/dooropener/ha-ca.pem:ro
-   ```
-
-Notes:
-
-- Ensure the hostname in `url` (e.g., `https://homeassistant.local`) matches a Subject Alternative Name in the certificate.
-- Build your PEM by concatenating the required certificates (root CA and any intermediates).
+> **Note:** The hostname in `ha_url` must match a Subject Alternative Name in the certificate.
 
 ## Usage
 
-1. **Access Interface** - Visit `http://localhost:6532`
-2. **Enter PIN** - Use the visual keypad to enter your 4-8 digit PIN
-3. **Auto-Submit** - Door opens automatically when valid PIN length is entered
-4. **Admin Access** - Click gear icon for admin dashboard (view logs, manage users)
+1. **Access interface** — visit `http://localhost:6532`
+2. **Enter PIN** — use the visual keypad (4–8 digit PIN)
+3. **Auto-submit** — the door opens automatically when a valid-length PIN is entered
+4. **Admin access** — click the gear icon for the admin dashboard
 
-## Security Features
+## Security
 
-- **Configurable Rate Limiting** - Customizable failed attempt limits and block times
-- **Multi-Layer Protection** - IP-based, session-based, and global rate limiting
-- **Progressive Delays** - Increasing delays (1s→16s) after failed attempts
-- **Session Tracking** - Prevents easy bypass of security measures  
-- **Audit Logging** - All attempts logged with timestamps, IPs, and results
-- **Input Validation** - PIN format validation and request sanitization
-- **Security Headers** - XSS protection, clickjacking prevention, CSP
+### Protection Layers
 
-### Security Configuration
+| Layer | Description |
+|-------|-------------|
+| **IP rate limiting** | Blocks an IP after `max_attempts` failures for `block_time_minutes` |
+| **Session rate limiting** | Blocks a browser session after `session_max_attempts` failures |
+| **Global rate limiting** | Caps total failed attempts system-wide to `max_global_attempts_per_hour` |
+| **Progressive delay info** | Exponential back-off metadata (1 s → 16 s) returned to the client |
+| **Persistent cookie block** | Block state survives page reloads via a session cookie |
+| **Audit logging** | Every attempt logged with timestamp, IP, session, user, and result |
+| **Input validation** | PIN format and request body validated before processing |
+| **Security headers** | CSP, X-Frame-Options DENY, HSTS referral, no-sniff, etc. |
+| **Bot detection** | Obvious bot/crawler/spider user-agents are rejected |
 
-All security parameters are configurable via `config.ini`:
+### Security Headers
 
-- `max_attempts` - Failed attempts per IP before blocking (default: 5)
-- `block_time_minutes` - Block duration in minutes (default: 5)
-- `max_global_attempts_per_hour` - Global rate limit across all users (default: 50)
-- `session_max_attempts` - Failed attempts per session before blocking (default: 3)
+Every response includes:
+
+- `Content-Security-Policy` — strict self-only policy
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `X-XSS-Protection: 1; mode=block`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy` — geolocation, camera, microphone disabled
+- `Cache-Control: no-store`
 
 ## API Endpoints
 
-- `GET /` - Main interface
-- `POST /open-door` - Door control (requires PIN unless OIDC pinless is enabled and user is authorized)
-- `GET /battery` - Battery level data
-- `GET /admin` - Admin dashboard
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/` | Main keypad interface |
+| `POST` | `/open-door` | Validate PIN and trigger door entity |
+| `GET` | `/battery` | Battery level JSON (`{"level": 85}`) |
+| `GET` | `/admin` | Admin dashboard |
+| `POST` | `/admin/auth` | Admin login |
+| `GET` | `/admin/check-auth` | Check admin session |
+| `POST` | `/admin/logout` | Admin logout |
+| `GET` | `/admin/logs` | Retrieve audit logs (admin auth required) |
+| `POST` | `/admin/logs/clear` | Clear logs (admin auth required) |
+| `GET` | `/admin/users` | List users (admin auth required) |
+| `POST` | `/admin/users` | Create user (admin auth required) |
+| `PUT` | `/admin/users/<name>` | Update user (admin auth required) |
+| `DELETE` | `/admin/users/<name>` | Delete user (admin auth required) |
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│                   app.py                        │
+│         Flask routes & request handling         │
+├────────────┬──────────────┬─────────────────────┤
+│ config.py  │ security.py  │   ha_client.py      │
+│ options.json│ RateLimiter  │   HAClient          │
+│ loader     │ headers      │   (requests.Session) │
+│ timezone   │ validation   │   trigger / battery  │
+├────────────┴──────────────┴─────────────────────┤
+│               users_store.py                    │
+│           JSON-based user management            │
+└─────────────────────────────────────────────────┘
+```
+
+| Module | Responsibility |
+|--------|---------------|
+| `config.py` | Loads `options.json`, exposes all settings as module attributes, timezone handling via `zoneinfo` |
+| `security.py` | `RateLimiter` class (IP / session / global), security headers, bot detection, PIN validation |
+| `ha_client.py` | `HAClient` class wrapping `requests.Session` — dispatches `switch`/`lock`/`input_boolean` services |
+| `users_store.py` | Atomic JSON-based user CRUD with usage tracking |
+| `app.py` | Flask app, route handlers, audit logging |
 
 ## Development
 
-**Test Mode:** Set `test_mode = true` in config to test interface without opening door.
+### Prerequisites
 
-**Manual Installation:**
+- Python 3.12+
+- An `options.json` file (copy from `options.json.example`)
+
+### Local Setup
+
 ```bash
-pip install -r requirements.txt
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+cp options.json.example options.json   # edit as needed
 python app.py
 ```
 
+### Running Tests
+
+```bash
+pytest --tb=short -q
+```
+
+With coverage:
+
+```bash
+pytest --cov=./ --cov-report=term-missing --cov-fail-under=75
+```
+
+### Linting & Security
+
+```bash
+ruff check .          # lint
+bandit -r . -x tests  # security scan
+```
+
+### Test Mode
+
+Set `"test_mode": true` in `options.json` to test the interface without actually triggering the door in Home Assistant.
+
+## CI / CD
+
+### GitHub Actions
+
+The CI pipeline (`.github/workflows/ci.yml`) runs on every push and PR:
+
+| Job | Tool | Purpose |
+|-----|------|---------|
+| **Tests** | pytest + pytest-cov | Unit/integration tests, 75 % coverage gate |
+| **Lint** | ruff | Code style and import checks |
+| **Security** | bandit | Static security analysis |
+| **Docker** | docker build | Smoke-test the container image |
+
+### Dependabot
+
+Weekly pull requests for dependency updates are configured via `.github/dependabot.yml`:
+
+- **pip** dependencies — every Monday
+- **GitHub Actions** versions — every Monday
+
 ## License
 
-Open source - see repository for details.
+Open source — see repository for details.
