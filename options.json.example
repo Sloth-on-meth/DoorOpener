@@ -12,5 +12,5 @@
     "session_max_attempts": 3,
     "secret_key": "",
     "session_cookie_secure": false,
-    "ca_bundle": ""
+    "ha_cert_pem": ""
 }

@@ -1,5 +1,5 @@
 name: DoorOpener
-version: "2.0.4"
+version: "2.0.5"
 slug: dooropener
 description: >-
   A secure web interface for controlling smart door openers via Home Assistant.
@@ -37,7 +37,7 @@ options:
   session_max_attempts: 3
   secret_key: ""
   session_cookie_secure: false
-  ca_bundle: ""
+  ha_cert_pem: ""
 schema:
   ha_url: url
   ha_token: str
@@ -52,4 +52,4 @@ schema:
   session_max_attempts: "int(1,50)"
   secret_key: str?
   session_cookie_secure: bool
-  ca_bundle: str?
+  ha_cert_pem: str?

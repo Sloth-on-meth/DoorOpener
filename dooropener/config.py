@@ -60,15 +60,30 @@ battery_entity: str = (
     _opts.get("battery_entity") or f"sensor.{device_name}_battery"
 ).strip()
 
-ha_ca_bundle: str = (
-    _opts.get("ca_bundle") or os.getenv("REQUESTS_CA_BUNDLE", "")
-).strip()
-if ha_ca_bundle and not os.path.exists(ha_ca_bundle):
-    logger.warning(
-        "Configured ca_bundle not found: %s. Falling back to system trust store.",
-        ha_ca_bundle,
-    )
-    ha_ca_bundle = ""
+# ---------------------------------------------------------------------------
+# Inline PEM certificate support
+# ---------------------------------------------------------------------------
+_ha_cert_pem: str = (_opts.get("ha_cert_pem") or "").strip()
+ha_ca_bundle: str = ""
+
+if _ha_cert_pem and "BEGIN CERTIFICATE" in _ha_cert_pem:
+    import tempfile
+
+    _cert_fd, _cert_path = tempfile.mkstemp(suffix=".pem", prefix="dooropener-ca-")
+    with os.fdopen(_cert_fd, "w") as _cf:
+        _cf.write(_ha_cert_pem)
+        if not _ha_cert_pem.endswith("\n"):
+            _cf.write("\n")
+    ha_ca_bundle = _cert_path
+    logger.info("Wrote inline HA certificate to %s", _cert_path)
+elif os.getenv("REQUESTS_CA_BUNDLE", "").strip():
+    ha_ca_bundle = os.getenv("REQUESTS_CA_BUNDLE", "").strip()
+    if not os.path.exists(ha_ca_bundle):
+        logger.warning(
+            "REQUESTS_CA_BUNDLE not found: %s. Falling back to system trust store.",
+            ha_ca_bundle,
+        )
+        ha_ca_bundle = ""
 
 # ---------------------------------------------------------------------------
 # Server

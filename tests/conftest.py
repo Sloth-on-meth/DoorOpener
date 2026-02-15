@@ -30,7 +30,7 @@ TEST_OPTIONS = {
     "session_max_attempts": 3,
     "secret_key": "test-secret-key-fixed",
     "session_cookie_secure": False,
-    "ca_bundle": "",
+    "ha_cert_pem": "",
 }
 
 _tmp_dir = tempfile.mkdtemp(prefix="dooropener_test_")

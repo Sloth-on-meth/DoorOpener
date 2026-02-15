@@ -43,7 +43,7 @@ jobs:
             'session_max_attempts': 3,
             'secret_key': 'ci-test-secret-key',
             'session_cookie_secure': False,
-            'ca_bundle': ''
+            'ha_cert_pem': ''
           }, open('options.json', 'w'))
           "
 

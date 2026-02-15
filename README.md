@@ -88,7 +88,7 @@ cp options.json.example options.json
   "session_max_attempts": 3,
   "secret_key": "",
   "session_cookie_secure": false,
-  "ca_bundle": ""
+  "ha_cert_pem": ""
 }
 ```
 
@@ -107,7 +107,7 @@ cp options.json.example options.json
 | `session_max_attempts` | Failed attempts per browser session before blocking | `3` |
 | `secret_key` | Flask secret key (leave empty + set `FLASK_SECRET_KEY` env var instead) | `""` |
 | `session_cookie_secure` | Set `true` when running behind HTTPS | `false` |
-| `ca_bundle` | Path to a custom CA bundle (PEM) for self-signed HA certificates | `""` |
+| `ha_cert_pem` | Inline PEM certificate for self-signed HA (see below) | `""` |
 
 ### Environment Variables (`.env` file)
 
@@ -145,30 +145,28 @@ The image supports `PUID`, `PGID`, and `UMASK` to avoid host-side `chown`. On st
 
 ## Self-Signed Certificates (Home Assistant)
 
-If your Home Assistant uses a self-signed certificate, provide a custom CA bundle:
+If your Home Assistant uses a self-signed certificate, paste the PEM certificate
+directly into the `ha_cert_pem` option.
 
-### Option 1 — `options.json` (recommended)
+In `options.json`:
 
-Set `"ca_bundle": "/etc/dooropener/ha-ca.pem"` in `options.json` and mount the file:
-
-```yaml
-services:
-  dooropener:
-    volumes:
-      - ./options.json:/app/options.json:ro
-      - ./certs/ha-ca.pem:/etc/dooropener/ha-ca.pem:ro
+```json
+{
+  "ha_cert_pem": "-----BEGIN CERTIFICATE-----\nMIIFTjCCA...\n-----END CERTIFICATE-----"
+}
 ```
 
-### Option 2 — Environment variable
+In the HA add-on YAML config (Settings → Add-ons → DoorOpener → Configuration):
 
 ```yaml
-services:
-  dooropener:
-    environment:
-      - REQUESTS_CA_BUNDLE=/etc/dooropener/ha-ca.pem
-    volumes:
-      - ./certs/ha-ca.pem:/etc/dooropener/ha-ca.pem:ro
+ha_cert_pem: |-
+  -----BEGIN CERTIFICATE-----
+  MIIFTjCCAzagAwIBAgIIAQ3X7arBz...
+  -----END CERTIFICATE-----
 ```
+
+The certificate is written to a temporary file at startup and used for all
+Home Assistant API calls.
 
 > **Note:** The hostname in `ha_url` must match a Subject Alternative Name in the certificate.
 
