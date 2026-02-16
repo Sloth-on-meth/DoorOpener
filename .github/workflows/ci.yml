@@ -9,90 +9,47 @@ on:
     branches: [main, master]
 
 jobs:
-  tests:
-    name: Tests (pytest + coverage)
+  ruff:
+    name: Lint (Ruff)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-          pip install -r dooropener/requirements.txt
-
-      - name: Prepare test options.json
-        run: |
-          python3 -c "
-          import json
-          json.dump({
-            'ha_url': 'http://localhost:8123',
-            'ha_token': 'dummy_test_token',
-            'entity_id': 'switch.test_door',
-            'battery_entity': 'sensor.test_door_battery',
-            'port': 6532,
-            'test_mode': True,
-            'admin_password': 'testpass',
-            'max_attempts': 5,
-            'block_time_minutes': 5,
-            'max_global_attempts_per_hour': 50,
-            'session_max_attempts': 3,
-            'secret_key': 'ci-test-secret-key',
-            'session_cookie_secure': False,
-            'ha_cert_pem': ''
-          }, open('options.json', 'w'))
-          "
-
-      - name: Run tests with coverage
-        run: >
-          pytest --maxfail=3 --disable-warnings -q
-          --cov=./ --cov-report=term-missing
-          --cov-fail-under=75
-
-  lint:
-    name: Lint (ruff)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install ruff
-        run: pip install ruff
-
-      - name: Run ruff
+      - run: pip install ruff
+      - name: Check for errors
         run: ruff check dooropener/ tests/
 
-  security:
-    name: Security (bandit)
+  tests:
+    name: Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run tests
+        run: pytest tests/ -v --cov=dooropener --cov-report=term-missing --cov-fail-under=75
 
-      - name: Install bandit
-        run: pip install bandit
-
-      - name: Security scan
-        run: bandit -q -r dooropener/ || true
-
-  docker:
-    name: Docker build smoke test
+  security:
+    name: Security (Bandit)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install bandit
+      - name: Security scan
+        run: bandit -q -r dooropener/
 
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
       - name: Build Docker image
         run: docker build -f Dockerfile.dev -t dooropener:ci .
