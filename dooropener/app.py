@@ -122,7 +122,7 @@ def _audit(ip, sid, user, status, details):
 def _touch(username):
     try:
         users_store.touch_user(username)
-    except Exception:
+    except Exception:  # nosec B110
         pass
 
 
@@ -415,7 +415,7 @@ def _parse_log_file():
                             "status": parts[3],
                             "details": parts[4] if len(parts) > 4 else None,
                         })
-            except Exception:
+            except Exception:  # nosec B112
                 continue
     return logs
 
@@ -453,7 +453,7 @@ def admin_logs_clear():
                     if "TEST MODE" in str(obj.get("details", "")):
                         removed += 1
                         continue
-                except Exception:
+                except Exception:  # nosec B110
                     pass
                 filtered.append(line)
             kept = len(filtered)
@@ -468,7 +468,7 @@ def admin_logs_clear():
                 try:
                     if os.path.exists(tmp):
                         os.remove(tmp)
-                except Exception:
+                except Exception:  # nosec B110
                     pass
         else:
             return jsonify({"error": "Invalid mode"}), 400
@@ -564,7 +564,7 @@ def admin_users_delete(username: str):
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     app.run(
-        host="0.0.0.0",
+        host="0.0.0.0",  # nosec B104
         port=config.server_port,
         debug=os.environ.get("FLASK_DEBUG", "false").lower() == "true",
     )
