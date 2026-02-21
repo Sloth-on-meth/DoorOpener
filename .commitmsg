@@ -1,25 +1,19 @@
-Security hardening, performance optimization & code cleanup
+feat(security): add CSRF protection and nonce-based CSP (S7, S8)
 
-Security fixes:
-- S1: Use hmac.compare_digest() for timing-safe admin password comparison
-- S2: XSS-escape all dynamic values in admin dashboard innerHTML injections
-- S3: Replace non-deterministic hash() with hashlib.sha256 for client fingerprinting
-- S4: Add periodic pruning of expired rate-limiter entries to prevent memory leaks
-- S5: Make users_store._save_atomic() truly atomic via tempfile + os.replace()
-- S6: Set X-XSS-Protection to 0 (modern best practice; CSP is the real protection)
-- S9: Add per-client rate limiting on /battery endpoint
+S7 – CSRF protection:
+- Generate per-session CSRF token (secrets.token_hex(32))
+- Validate X-CSRF-Token header on all POST/PUT/DELETE endpoints
+- Templates include <meta name="csrf-token"> for JS fetch calls
+- All fetch() calls in index.html and admin.html send the header
 
-Performance optimizations:
-- P1: Cache battery API calls with 60s TTL (returns stale on error)
-- P2: Batch touch_user disk writes via pending touches buffer
-- P3: Parse only tail of log file (last 500 entries) instead of full 1MB
-- P4: Reduce gunicorn from 2 workers to 1 (halves memory for single-user app)
-- P5: Replace defaultdict(lambda) with plain dict + .get() (less memory, no silent growth)
-- P6: Limit requests.Session connection pool to 1 connection (only 1 HA host)
-- P7: Add gzip response compression for text responses over 512 bytes
-- P8: Add __slots__ to RateLimiter, HAClient, UsersStore classes
+S8 – Nonce-based CSP (replaces unsafe-inline):
+- Generate per-request CSP nonce via secrets.token_urlsafe(16)
+- <style> and <script> tags in both templates use nonce="{{ csp_nonce }}"
+- CSP header uses 'nonce-{nonce}' for script-src and style-src
+- Falls back to 'unsafe-inline' when nonce is unavailable
 
-Code quality:
-- Q1: Remove duplicate openClearAll/clearLogs functions in admin.html
-- Q2: Remove per-request app.permanent_session_lifetime override (already set at init)
-- Q3: Add 60s battery polling interval (was only fetched once at page load)
+Tests:
+- 8 new dedicated CSRF tests (test_csrf.py)
+- CSP nonce assertion in test_routes.py
+- Autouse fixture bypasses CSRF for existing tests; CSRF tests re-enable it
+- All 79 tests pass
