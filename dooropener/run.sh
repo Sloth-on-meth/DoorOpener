@@ -33,6 +33,6 @@ cd /app
 exec gunicorn \
   --bind "0.0.0.0:${DOOROPENER_PORT}" \
   app:app \
-  --workers 2 \
+  --workers 1 \
   --threads 2 \
   --timeout 60

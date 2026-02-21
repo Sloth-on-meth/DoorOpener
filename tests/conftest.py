@@ -72,4 +72,8 @@ def reset_state():
     app_module.users_store.data = {"users": {}}
     app_module.users_store._loaded = True
     app_module.users_store._pin_cache = None
+    app_module.users_store._pending_touches = {}
+    # Reset battery cache
+    app_module.ha_client._battery_cache = None
+    app_module.ha_client._battery_cache_ts = 0.0
     yield

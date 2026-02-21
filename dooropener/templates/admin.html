@@ -416,6 +416,18 @@
         let filteredLogs = [];
         let isAuthenticated = false;
 
+        // XSS-safe escaping utilities
+        const _escDiv = document.createElement('div');
+        function escapeHtml(str) {
+            if (!str) return '';
+            _escDiv.textContent = str;
+            return _escDiv.innerHTML;
+        }
+        function escapeAttr(str) {
+            if (!str) return '';
+            return str.replace(/[&"'<>]/g, c => ({'&':'&amp;','"':'&quot;',"'":'&#39;','<':'&lt;','>':'&gt;'}[c]));
+        }
+
         async function login() {
             const password = document.getElementById('adminPassword').value;
             const rememberMe = document.getElementById('rememberMe').checked;
@@ -563,13 +575,13 @@
                 const timesUsed = u.times_used || 0;
                 const src = u.source || 'store';
                 const actionsHtml = `
-                    <button class="refresh-btn" style="padding:6px 10px; background: linear-gradient(135deg, #5e35b1, #4527a0);" onclick="openEditUser('${u.username}')">Edit</button>
-                    <button class="refresh-btn" style="padding:6px 10px; background: linear-gradient(135deg, #00897b, #00695c);" onclick="toggleActive('${u.username}', ${u.active ? 'false' : 'true'})">${u.active ? 'Deactivate' : 'Activate'}</button>
-                    <button class="refresh-btn" style="padding:6px 10px; background: linear-gradient(135deg, #e53935, #c62828);" onclick="deleteUser('${u.username}')">Delete</button>
+                    <button class="refresh-btn" style="padding:6px 10px; background: linear-gradient(135deg, #5e35b1, #4527a0);" onclick="openEditUser('${escapeAttr(u.username)}')">Edit</button>
+                    <button class="refresh-btn" style="padding:6px 10px; background: linear-gradient(135deg, #00897b, #00695c);" onclick="toggleActive('${escapeAttr(u.username)}', ${u.active ? 'false' : 'true'})">${u.active ? 'Deactivate' : 'Activate'}</button>
+                    <button class="refresh-btn" style="padding:6px 10px; background: linear-gradient(135deg, #e53935, #c62828);" onclick="deleteUser('${escapeAttr(u.username)}')">Delete</button>
                 `;
                 return `
                     <tr>
-                        <td data-label="Username">${u.username}</td>
+                        <td data-label="Username">${escapeHtml(u.username)}</td>
                         <td data-label="Active">${activeStr}</td>
                         <td data-label="Source">${src}</td>
                         <td data-label="Created">${created}</td>
@@ -840,11 +852,11 @@
                 
                 return `
                     <tr>
-                        <td data-label="Timestamp">${timestamp}</td>
-                        <td data-label="IP Address">${log.ip}</td>
-                        <td data-label="User">${log.user || 'UNKNOWN'}</td>
-                        <td class="${statusClass}" data-label="Status">${log.status}</td>
-                        <td data-label="Details">${log.details || '-'}</td>
+                        <td data-label="Timestamp">${escapeHtml(timestamp)}</td>
+                        <td data-label="IP Address">${escapeHtml(log.ip)}</td>
+                        <td data-label="User">${escapeHtml(log.user || 'UNKNOWN')}</td>
+                        <td class="${statusClass}" data-label="Status">${escapeHtml(log.status)}</td>
+                        <td data-label="Details">${escapeHtml(log.details || '-')}</td>
                     </tr>
                 `;
             }).join('');
@@ -866,9 +878,9 @@
                                 <span class="source-badge config-only">Config-only</span>
                             </td>
                             <div class="card-body">
-                                <div class="card-row"><span class="label">IP Address</span><span class="value">${log.ip}</span></div>
-                                <div class="card-row"><span class="label">User</span><span class="value">${log.user || 'UNKNOWN'}</span></div>
-                                <div class="card-row"><span class="label">Details</span><span class="value">${log.details || '-'}</span></div>
+                                <div class="card-row"><span class="label">IP Address</span><span class="value">${escapeHtml(log.ip)}</span></div>
+                                <div class="card-row"><span class="label">User</span><span class="value">${escapeHtml(log.user || 'UNKNOWN')}</span></div>
+                                <div class="card-row"><span class="label">Details</span><span class="value">${escapeHtml(log.details || '-')}</span></div>
                             </div>
                         </div>
                     `;
@@ -932,42 +944,6 @@
                 el.style.opacity = '';
                 el.textContent = el.dataset.origLabel || orig;
             };
-        }
-
-        // Log clearing functions
-        function openClearAll(btnId) {
-            const fields = `
-                <div style="color: rgba(0,0,0,0.75); margin-bottom:8px">This will permanently remove all log entries.</div>
-                <div style="font-size: 0.92em; color: rgba(0,0,0,0.6)">Are you sure?</div>
-            `;
-            showModal('Clear All Logs', fields, async () => {
-                await clearLogs('all', btnId);
-            });
-        }
-
-        async function clearLogs(mode, btnId) {
-            try {
-                const restore = setButtonBusy(btnId, mode === 'all' ? 'Clearing…' : 'Removing…');
-                const res = await fetch('/admin/logs/clear', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'same-origin',
-                    cache: 'no-store',
-                    body: JSON.stringify({ mode })
-                });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) {
-                    showToast('Clear logs failed: ' + (data.error || res.status), 'error');
-                    if (typeof restore === 'function') restore();
-                    return;
-                }
-                const removed = data.removed ?? 0;
-                showToast((mode === 'all' ? 'All logs cleared' : `Removed ${removed} test entries`), 'success');
-                await loadLogs();
-                if (typeof restore === 'function') restore();
-            } catch (e) {
-                showToast('Clear logs failed', 'error');
-            }
         }
 
         // Toast helper

@@ -19,4 +19,4 @@ COPY dooropener/static/ ./static/
 
 EXPOSE 6532
 
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${DOOROPENER_PORT:-6532} app:app --workers 2 --threads 2 --timeout 60"]
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${DOOROPENER_PORT:-6532} app:app --workers 1 --threads 2 --timeout 60"]

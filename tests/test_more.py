@@ -33,12 +33,12 @@ def test_battery_out_of_range_and_none_paths():
 
 def test_admin_logs_old_format_parsing():
     old_line = "2025-09-01T12:00:00Z - 1.2.3.4 - alice - SUCCESS - Door opened\n"
-    from io import StringIO
+    from io import BytesIO
 
-    file_obj = StringIO(old_line)
-    with patch("os.path.exists", return_value=True), patch(
-        "builtins.open", return_value=file_obj
-    ):
+    file_obj = BytesIO(old_line.encode("utf-8"))
+    with patch("os.path.exists", return_value=True), \
+         patch("os.path.getsize", return_value=len(old_line.encode("utf-8"))), \
+         patch("builtins.open", return_value=file_obj):
         c = client_app()
         with c.session_transaction() as s:
             s["admin_authenticated"] = True

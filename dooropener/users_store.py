@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
@@ -23,11 +24,14 @@ class UsersStore:
     - Maintains a cached ``{pin: username}`` reverse map, invalidated on any CRUD operation.
     """
 
+    __slots__ = ("path", "data", "_loaded", "_pin_cache", "_pending_touches")
+
     def __init__(self, path: str):
         self.path = path
         self.data: Dict[str, Any] = {"users": {}}
         self._loaded = False
         self._pin_cache: Dict[str, str] | None = None  # pin -> username
+        self._pending_touches: Dict[str, int] = {}  # username -> count
 
     def _load_file(self) -> None:
         if self._loaded:
@@ -50,9 +54,19 @@ class UsersStore:
             self._pin_cache = None  # invalidate on load
 
     def _save_atomic(self) -> None:
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        with open(self.path, "w", encoding="utf-8") as f:
-            json.dump(self.data, f, ensure_ascii=False, indent=2)
+        dir_name = os.path.dirname(self.path)
+        os.makedirs(dir_name, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(suffix=".json", prefix=".users-", dir=dir_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self.data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, self.path)
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
         self._pin_cache = None  # invalidate on write
 
     def _invalidate_cache(self) -> None:
@@ -156,14 +170,24 @@ class UsersStore:
         self._save_atomic()
 
     def touch_user(self, username: str) -> None:
+        """Record a usage event. Batches disk writes — call flush_touches() periodically."""
+        self._pending_touches[username] = self._pending_touches.get(username, 0) + 1
+        self._flush_touches()
+
+    def _flush_touches(self) -> None:
+        """Write all pending touch events to disk in a single atomic write."""
+        if not self._pending_touches:
+            return
         self._ensure_loaded()
-        if username in self.data["users"]:
-            self.data["users"][username]["last_used_at"] = _now_iso()
-            # Increment times_used counter, defaulting to 0 if not present (for existing users)
-            self.data["users"][username]["times_used"] = (
-                self.data["users"][username].get("times_used", 0) + 1
-            )
-            self._save_atomic()
+        now = _now_iso()
+        for username, count in self._pending_touches.items():
+            if username in self.data["users"]:
+                self.data["users"][username]["last_used_at"] = now
+                self.data["users"][username]["times_used"] = (
+                    self.data["users"][username].get("times_used", 0) + count
+                )
+        self._pending_touches.clear()
+        self._save_atomic()
 
     def user_exists(self, username: str) -> bool:
         self._ensure_loaded()

@@ -1,8 +1,10 @@
 """Home Assistant API client."""
 
 import logging
+import time
 
 import requests
+from requests.adapters import HTTPAdapter
 
 import config
 
@@ -16,8 +18,13 @@ class HAClient:
     the ``config`` module at call time so that tests can monkeypatch them.
     """
 
+    __slots__ = ("session", "_battery_cache", "_battery_cache_ts")
+
     def __init__(self):
         self.session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=1, pool_maxsize=2)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
         self.session.verify = config.ha_ca_bundle if config.ha_ca_bundle else True
         self.session.headers.update(
             {
@@ -25,6 +32,8 @@ class HAClient:
                 "Content-Type": "application/json",
             }
         )
+        self._battery_cache: int | None = None
+        self._battery_cache_ts: float = 0.0
 
     def trigger_entity(self) -> dict:
         """Call the correct HA service to open the door.
@@ -55,8 +64,13 @@ class HAClient:
                 "status_code": code,
             }
 
+    _BATTERY_TTL = 60  # seconds
+
     def get_battery_level(self) -> int | None:
-        """Fetch battery percentage (0-100) or ``None``."""
+        """Fetch battery percentage (0-100) or ``None``. Cached for 60s."""
+        now = time.monotonic()
+        if now - self._battery_cache_ts < self._BATTERY_TTL:
+            return self._battery_cache
         try:
             resp = self.session.get(
                 f"{config.ha_url}/api/states/{config.battery_entity}",
@@ -64,12 +78,14 @@ class HAClient:
             )
             if resp.status_code != 200:
                 logger.error("Battery fetch HTTP %s", resp.status_code)
-                return None
+                return self._battery_cache  # return stale on error
             state = resp.json().get("state")
             if state is not None:
                 level = float(state)
                 if 0 <= level <= 100:
-                    return int(level)
+                    self._battery_cache = int(level)
+                    self._battery_cache_ts = now
+                    return self._battery_cache
         except Exception as exc:
             logger.warning("Battery fetch error: %s", exc)
-        return None
+        return self._battery_cache

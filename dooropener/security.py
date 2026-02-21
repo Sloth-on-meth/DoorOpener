@@ -1,9 +1,9 @@
 """Security helpers: rate limiting, headers, request validation."""
 
+import hashlib
 import logging
 import secrets
 import time
-from collections import defaultdict
 from datetime import timedelta
 
 from flask import request, session
@@ -29,13 +29,20 @@ class RateLimiter:
     automatic blocking after configurable thresholds.
     """
 
+    __slots__ = (
+        "ip_failed", "ip_blocked_until", "session_failed",
+        "session_blocked_until", "global_failed", "global_last_reset",
+        "_last_prune",
+    )
+
     def __init__(self):
-        self.ip_failed = defaultdict(int)
-        self.ip_blocked_until = defaultdict(lambda: None)
-        self.session_failed = defaultdict(int)
-        self.session_blocked_until = defaultdict(lambda: None)
+        self.ip_failed: dict[str, int] = {}
+        self.ip_blocked_until: dict[str, object] = {}
+        self.session_failed: dict[str, int] = {}
+        self.session_blocked_until: dict[str, object] = {}
         self.global_failed = 0
         self.global_last_reset = get_current_time()
+        self._last_prune = get_current_time()
 
     # --- Query methods ---
 
@@ -44,7 +51,17 @@ class RateLimiter:
         if now - self.global_last_reset > timedelta(hours=1):
             self.global_failed = 0
             self.global_last_reset = now
+            self._prune_expired(now)
         return self.global_failed < MAX_GLOBAL_ATTEMPTS_PER_HOUR
+
+    def _prune_expired(self, now) -> None:
+        """Remove expired block/failure entries to prevent unbounded memory growth."""
+        for key in [k for k, v in self.ip_blocked_until.items() if v and now >= v]:
+            del self.ip_blocked_until[key]
+            self.ip_failed.pop(key, None)
+        for key in [k for k, v in self.session_blocked_until.items() if v and now >= v]:
+            del self.session_blocked_until[key]
+            self.session_failed.pop(key, None)
 
     def is_blocked(self, identifier: str, session_id: str) -> tuple[bool, float]:
         """Return (blocked, remaining_seconds) checking all layers."""
@@ -56,11 +73,11 @@ class RateLimiter:
         now = get_current_time()
         remaining = 0.0
 
-        sb = self.session_blocked_until[session_id]
+        sb = self.session_blocked_until.get(session_id)
         if sb and now < sb:
             remaining = max(remaining, (sb - now).total_seconds())
 
-        ib = self.ip_blocked_until[identifier]
+        ib = self.ip_blocked_until.get(identifier)
         if ib and now < ib:
             remaining = max(remaining, (ib - now).total_seconds())
 
@@ -71,11 +88,11 @@ class RateLimiter:
         now = get_current_time()
         ts = None
 
-        sb = self.session_blocked_until[session_id]
+        sb = self.session_blocked_until.get(session_id)
         if sb and now < sb:
             ts = sb.timestamp()
 
-        ib = self.ip_blocked_until[identifier]
+        ib = self.ip_blocked_until.get(identifier)
         if ib and now < ib:
             ip_ts = ib.timestamp()
             ts = max(ts or ip_ts, ip_ts)
@@ -93,8 +110,8 @@ class RateLimiter:
         reason_key: ``"session_blocked"`` | ``"ip_blocked"`` | ``"failed"``
         """
         now = get_current_time()
-        self.ip_failed[identifier] += 1
-        self.session_failed[session_id] += 1
+        self.ip_failed[identifier] = self.ip_failed.get(identifier, 0) + 1
+        self.session_failed[session_id] = self.session_failed.get(session_id, 0) + 1
         self.global_failed += 1
 
         if self.session_failed[session_id] >= SESSION_MAX_ATTEMPTS:
@@ -107,15 +124,15 @@ class RateLimiter:
             return "ip_blocked", 0
 
         remaining = min(
-            SESSION_MAX_ATTEMPTS - self.session_failed[session_id],
-            MAX_ATTEMPTS - self.ip_failed[identifier],
+            SESSION_MAX_ATTEMPTS - self.session_failed.get(session_id, 0),
+            MAX_ATTEMPTS - self.ip_failed.get(identifier, 0),
         )
         return "failed", remaining
 
     def record_success(self, identifier: str, session_id: str) -> None:
         """Clear all rate-limiting state for a successful authentication."""
-        self.ip_failed[identifier] = 0
-        self.session_failed[session_id] = 0
+        self.ip_failed.pop(identifier, None)
+        self.session_failed.pop(session_id, None)
         if identifier in self.ip_blocked_until:
             del self.ip_blocked_until[identifier]
         if session_id in self.session_blocked_until:
@@ -136,7 +153,8 @@ def get_client_identifier() -> tuple[str, str, str]:
 
     ua = request.headers.get("User-Agent", "")[:100]
     lang = request.headers.get("Accept-Language", "")[:50]
-    identifier = f"{primary_ip}:{hash(ua + lang) % 10000}"
+    fp = hashlib.sha256((ua + lang).encode()).hexdigest()[:8]
+    identifier = f"{primary_ip}:{fp}"
     return primary_ip, session_id, identifier
 
 
@@ -144,7 +162,7 @@ def add_security_headers(response):
     """Attach hardening headers to every response."""
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["X-XSS-Protection"] = "0"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = (
         "geolocation=(), microphone=(), camera=(), payment=(), usb=(), "

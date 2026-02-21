@@ -6,6 +6,8 @@ Secure Flask web app to open a door via Home Assistant API with visual
 keypad interface and comprehensive brute-force protection.
 """
 
+import gzip
+import hmac
 import json
 import logging
 import os
@@ -131,7 +133,24 @@ def _touch(username):
 # ---------------------------------------------------------------------------
 @app.after_request
 def after_request(response):
-    return add_security_headers(response)
+    response = add_security_headers(response)
+    # Gzip compression for text responses > 512 bytes
+    if (
+        response.status_code == 200
+        and "gzip" in request.headers.get("Accept-Encoding", "")
+        and response.content_type
+        and any(t in response.content_type for t in ("text/", "application/json", "javascript"))
+        and response.content_length
+        and response.content_length > 512
+    ):
+        data = response.get_data()
+        compressed = gzip.compress(data, compresslevel=6)
+        if len(compressed) < len(data):
+            response.set_data(compressed)
+            response.headers["Content-Encoding"] = "gzip"
+            response.headers["Content-Length"] = len(compressed)
+            response.headers["Vary"] = "Accept-Encoding"
+    return response
 
 
 @app.route("/")
@@ -164,10 +183,20 @@ def manifest_file():
 
 
 # ---------------------------------------------------------------------------
-# Battery
+# Battery (rate-limited: max 1 request per 10s per client)
 # ---------------------------------------------------------------------------
+_battery_request_ts: dict[str, float] = {}
+
 @app.route("/battery")
 def battery():
+    import time as _time
+    client_ip = request.remote_addr
+    now = _time.monotonic()
+    last = _battery_request_ts.get(client_ip, 0.0)
+    if now - last < 10:
+        level = ha_client.get_battery_level()  # cheap — returns from cache
+        return jsonify({"level": level})
+    _battery_request_ts[client_ip] = now
     level = ha_client.get_battery_level()
     return jsonify({"level": level})
 
@@ -306,7 +335,7 @@ def admin_auth():
 
     if (
         rate_limiter.session_blocked_until.get(session_id)
-        and now < rate_limiter.session_blocked_until[session_id]
+        and now < rate_limiter.session_blocked_until.get(session_id)
     ):
         remaining = (rate_limiter.session_blocked_until[session_id] - now).total_seconds()
         _audit(primary_ip, session_id, "ADMIN", "ADMIN_SESSION_BLOCKED",
@@ -314,22 +343,20 @@ def admin_auth():
         return jsonify({"status": "error",
                         "message": "Too many failed attempts. Please try later."}), 429
 
-    if password == config.admin_password:
-        rate_limiter.session_failed[session_id] = 0
-        if session_id in rate_limiter.session_blocked_until:
-            del rate_limiter.session_blocked_until[session_id]
+    if hmac.compare_digest(password, config.admin_password):
+        rate_limiter.session_failed.pop(session_id, None)
+        rate_limiter.session_blocked_until.pop(session_id, None)
         session["admin_authenticated"] = True
         session["admin_login_time"] = now.isoformat()
         if remember_me:
             session.permanent = True
-            app.permanent_session_lifetime = timedelta(days=30)
         else:
             session.permanent = False
         _audit(primary_ip, session_id, "ADMIN", "ADMIN_SUCCESS", "Admin login")
         return jsonify({"status": "success"})
 
     # Failure
-    rate_limiter.session_failed[session_id] += 1
+    rate_limiter.session_failed[session_id] = rate_limiter.session_failed.get(session_id, 0) + 1
     if rate_limiter.session_failed[session_id] >= config.SESSION_MAX_ATTEMPTS:
         rate_limiter.session_blocked_until[session_id] = now + config.BLOCK_TIME
         details = (f"Invalid admin password. Session blocked for "
@@ -384,40 +411,55 @@ def admin_logs():
         return jsonify({"error": "Failed to load logs"}), 500
 
 
-def _parse_log_file():
+def _parse_log_file(max_entries: int = 500):
+    """Parse the log file, returning at most *max_entries* most recent entries."""
     logs = []
     path = os.path.join(log_dir, "log.txt")
     if not os.path.exists(path):
         return logs
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            try:
-                json_start = line.find("{")
-                if json_start != -1:
-                    obj = json.loads(line[json_start:])
-                else:
-                    obj = json.loads(line)
-                logs.append({
-                    "timestamp": obj.get("timestamp"),
-                    "ip": obj.get("ip"),
-                    "user": obj.get("user") if obj.get("user") != "UNKNOWN" else None,
-                    "status": obj.get("status"),
-                    "details": obj.get("details"),
-                })
-            except json.JSONDecodeError:
-                if " - " in line and not line.startswith("{"):
-                    parts = line.split(" - ", 4)
-                    if len(parts) >= 4:
-                        logs.append({
-                            "timestamp": parts[0],
-                            "ip": parts[1],
-                            "user": parts[2] if parts[2] != "UNKNOWN" else None,
-                            "status": parts[3],
-                            "details": parts[4] if len(parts) > 4 else None,
-                        })
-            except Exception:  # nosec B112
-                continue
-    return logs
+
+    # Read only the tail of the file to avoid loading megabytes into memory
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return logs
+
+    # Estimate ~200 bytes per line; read enough for max_entries + margin
+    read_bytes = min(size, max_entries * 250)
+    with open(path, "rb") as f:
+        if read_bytes < size:
+            f.seek(size - read_bytes)
+            f.readline()  # skip partial first line
+        lines = f.read().decode("utf-8", errors="replace").splitlines()
+
+    for line in lines:
+        try:
+            json_start = line.find("{")
+            if json_start != -1:
+                obj = json.loads(line[json_start:])
+            else:
+                obj = json.loads(line)
+            logs.append({
+                "timestamp": obj.get("timestamp"),
+                "ip": obj.get("ip"),
+                "user": obj.get("user") if obj.get("user") != "UNKNOWN" else None,
+                "status": obj.get("status"),
+                "details": obj.get("details"),
+            })
+        except json.JSONDecodeError:
+            if " - " in line and not line.startswith("{"):
+                parts = line.split(" - ", 4)
+                if len(parts) >= 4:
+                    logs.append({
+                        "timestamp": parts[0],
+                        "ip": parts[1],
+                        "user": parts[2] if parts[2] != "UNKNOWN" else None,
+                        "status": parts[3],
+                        "details": parts[4] if len(parts) > 4 else None,
+                    })
+        except Exception:  # nosec B112
+            continue
+    return logs[-max_entries:]
 
 
 @app.route("/admin/logs/clear", methods=["POST"])

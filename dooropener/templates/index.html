@@ -897,8 +897,9 @@
             if ('serviceWorker' in navigator) {
                 navigator.serviceWorker.register('/service-worker.js').catch(() => { /* ignore */ });
             }
-            // Initial battery level fetch
+            // Initial battery level fetch, then poll every 60s
             fetchBatteryLevel();
+            setInterval(fetchBatteryLevel, 60000);
 
             // Initialize PIN display
             updatePinDisplay();
