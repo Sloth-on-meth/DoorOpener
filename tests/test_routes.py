@@ -26,6 +26,14 @@ def test_csp_directives_on_index(client):
     assert "connect-src 'self'" in csp
 
 
+def test_csp_uses_nonce_not_unsafe_inline(client):
+    """CSP should use nonce-based policy, not unsafe-inline."""
+    r = client.get("/")
+    csp = r.headers.get("Content-Security-Policy", "")
+    assert "'nonce-" in csp
+    assert "'unsafe-inline'" not in csp
+
+
 def test_delay_function_values():
     from security import get_delay_seconds
     expected = {0: 0, 1: 1, 2: 2, 3: 4, 4: 8, 5: 16, 6: 16}

@@ -76,4 +76,8 @@ def reset_state():
     # Reset battery cache
     app_module.ha_client._battery_cache = None
     app_module.ha_client._battery_cache_ts = 0.0
+    # Bypass CSRF for all tests (dedicated CSRF tests re-enable it)
+    _original_check_csrf = app_module._check_csrf
+    app_module._check_csrf = lambda: None
     yield
+    app_module._check_csrf = _original_check_csrf

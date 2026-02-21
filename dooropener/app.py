@@ -19,6 +19,7 @@ import secrets
 from flask import (
     Flask,
     abort,
+    g,
     jsonify,
     render_template,
     request,
@@ -129,11 +130,33 @@ def _touch(username):
 
 
 # ---------------------------------------------------------------------------
+# CSRF + CSP nonce
+# ---------------------------------------------------------------------------
+@app.before_request
+def _set_nonce_and_csrf():
+    """Generate per-request CSP nonce and ensure a CSRF token exists in the session."""
+    g.csp_nonce = secrets.token_urlsafe(16)
+    if "_csrf_token" not in session:
+        session["_csrf_token"] = secrets.token_hex(32)
+
+
+def _check_csrf():
+    """Return an error response if CSRF token is missing or invalid, else None."""
+    token = request.headers.get("X-CSRF-Token") or (
+        request.get_json(silent=True) or {}
+    ).get("_csrf_token")
+    if not token or not hmac.compare_digest(token, session.get("_csrf_token", "")):
+        return jsonify({"status": "error", "message": "Invalid or missing CSRF token"}), 403
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 @app.after_request
 def after_request(response):
-    response = add_security_headers(response)
+    nonce = getattr(g, "csp_nonce", None)
+    response = add_security_headers(response, csp_nonce=nonce)
     # Gzip compression for text responses > 512 bytes
     if (
         response.status_code == 200
@@ -155,7 +178,7 @@ def after_request(response):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", csp_nonce=g.csp_nonce, csrf_token=session.get("_csrf_token", ""))
 
 
 @app.route("/service-worker.js")
@@ -206,6 +229,9 @@ def battery():
 # ---------------------------------------------------------------------------
 @app.route("/open-door", methods=["POST"])
 def open_door():
+    csrf_err = _check_csrf()
+    if csrf_err:
+        return csrf_err
     try:
         primary_ip, session_id, identifier = get_client_identifier()
 
@@ -322,11 +348,14 @@ def open_door():
 # ---------------------------------------------------------------------------
 @app.route("/admin")
 def admin():
-    return render_template("admin.html")
+    return render_template("admin.html", csp_nonce=g.csp_nonce, csrf_token=session.get("_csrf_token", ""))
 
 
 @app.route("/admin/auth", methods=["POST"])
 def admin_auth():
+    csrf_err = _check_csrf()
+    if csrf_err:
+        return csrf_err
     data = request.get_json()
     password = data.get("password", "").strip() if data else ""
     remember_me = data.get("remember_me", False) if data else False
@@ -378,6 +407,9 @@ def admin_check_auth():
 
 @app.route("/admin/logout", methods=["POST"])
 def admin_logout():
+    csrf_err = _check_csrf()
+    if csrf_err:
+        return csrf_err
     session.pop("admin_authenticated", None)
     session.pop("admin_login_time", None)
     session.permanent = False
@@ -465,6 +497,9 @@ def _parse_log_file(max_entries: int = 500):
 @app.route("/admin/logs/clear", methods=["POST"])
 @require_admin
 def admin_logs_clear():
+    csrf_err = _check_csrf()
+    if csrf_err:
+        return csrf_err
 
     body = request.get_json(silent=True) or {}
     mode = (body.get("mode") or "all").lower()
@@ -546,6 +581,9 @@ def admin_users_list():
 @app.route("/admin/users", methods=["POST"])
 @require_admin
 def admin_users_create():
+    csrf_err = _check_csrf()
+    if csrf_err:
+        return csrf_err
     try:
         body = request.get_json(silent=True) or {}
         username = body.get("username")
@@ -570,6 +608,9 @@ def admin_users_create():
 @app.route("/admin/users/<username>", methods=["PUT"])
 @require_admin
 def admin_users_update(username: str):
+    csrf_err = _check_csrf()
+    if csrf_err:
+        return csrf_err
     try:
         body = request.get_json(silent=True) or {}
         users_store.update_user(username, pin=body.get("pin"), active=body.get("active"))
@@ -589,6 +630,9 @@ def admin_users_update(username: str):
 @app.route("/admin/users/<username>", methods=["DELETE"])
 @require_admin
 def admin_users_delete(username: str):
+    csrf_err = _check_csrf()
+    if csrf_err:
+        return csrf_err
     try:
         users_store.delete_user(username)
         ip, sid, _ = get_client_identifier()

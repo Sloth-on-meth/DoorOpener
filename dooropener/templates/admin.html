@@ -6,7 +6,8 @@
     <title>Admin - Door Opener v1.8</title>
     <link rel="icon" type="image/png" href="/static/favicon.png">
     <link rel="shortcut icon" href="/static/favicon.ico">
-    <style>
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <style nonce="{{ csp_nonce }}">
         body {
             font-family: 'Arial', sans-serif;
             margin: 0;
@@ -411,7 +412,7 @@
         </div>
     </div>
 
-    <script>
+    <script nonce="{{ csp_nonce }}">
         let allLogs = [];
         let filteredLogs = [];
         let isAuthenticated = false;
@@ -436,7 +437,7 @@
             try {
                 const res = await fetch('/admin/auth', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content },
                     credentials: 'same-origin',
                     cache: 'no-store',
                     body: JSON.stringify({ password, remember_me: rememberMe })
@@ -497,6 +498,7 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content,
                 },
                 credentials: 'same-origin',
                 cache: 'no-store'
@@ -645,7 +647,7 @@
             try {
                 const res = await fetch('/admin/users', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content },
                     credentials: 'same-origin',
                     cache: 'no-store',
                     body: JSON.stringify({ username, pin, active: true }),
@@ -681,7 +683,7 @@
                 if (pin !== undefined) body.pin = pin;
                 const res = await fetch('/admin/users/' + encodeURIComponent(username), {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content },
                     credentials: 'same-origin',
                     cache: 'no-store',
                     body: JSON.stringify(body),
@@ -702,7 +704,7 @@
             try {
                 const res = await fetch('/admin/users/' + encodeURIComponent(username), {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content },
                     credentials: 'same-origin',
                     cache: 'no-store',
                     body: JSON.stringify({ active }),
@@ -724,6 +726,7 @@
             try {
                 const res = await fetch('/admin/users/' + encodeURIComponent(username), {
                     method: 'DELETE',
+                    headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content },
                     credentials: 'same-origin',
                     cache: 'no-store',
                 });
@@ -756,7 +759,7 @@
                 const restore = setButtonBusy(btnId, mode === 'all' ? 'Clearing…' : 'Removing…');
                 const res = await fetch('/admin/logs/clear', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content },
                     credentials: 'same-origin',
                     cache: 'no-store',
                     body: JSON.stringify({ mode })

@@ -158,7 +158,7 @@ def get_client_identifier() -> tuple[str, str, str]:
     return primary_ip, session_id, identifier
 
 
-def add_security_headers(response):
+def add_security_headers(response, csp_nonce: str | None = None):
     """Attach hardening headers to every response."""
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -170,15 +170,28 @@ def add_security_headers(response):
     )
     response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; "
-        "font-src 'self'; "
-        "connect-src 'self'; "
-        "object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
-    )
+
+    if csp_nonce:
+        nonce_src = f"'nonce-{csp_nonce}'"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            f"script-src 'self' {nonce_src}; "
+            f"style-src 'self' {nonce_src}; "
+            "img-src 'self' data:; "
+            "font-src 'self'; "
+            "connect-src 'self'; "
+            "object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+        )
+    else:
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; "
+            "font-src 'self'; "
+            "connect-src 'self'; "
+            "object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+        )
     response.headers["Cache-Control"] = (
         "no-store, no-cache, must-revalidate, max-age=0"
     )
