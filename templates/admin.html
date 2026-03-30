@@ -621,6 +621,28 @@
         .modal-hl   { color:#fff; }
         .modal-code { color:#ffd740; }
 
+        /* notice panel */
+        .notice-panel { display:flex; flex-direction:column; gap:10px; }
+        .notice-panel textarea {
+            width:100%; box-sizing:border-box; min-height:72px; resize:vertical;
+            background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.18);
+            border-radius:10px; color:#fff; font-size:0.88rem; padding:10px 12px;
+            font-family:inherit; outline:none; transition:border-color 0.2s;
+        }
+        .notice-panel textarea:focus { border-color:rgba(255,180,0,0.55); }
+        .notice-panel textarea::placeholder { color:rgba(255,255,255,0.28); }
+        .notice-actions { display:flex; gap:8px; align-items:center; }
+        .notice-status { font-size:0.78rem; color:rgba(102,187,106,0.85); margin-left:auto; opacity:0; transition:opacity 0.4s; }
+        .notice-status.visible { opacity:1; }
+        .notice-preview {
+            padding:10px 12px; border-radius:10px;
+            background:rgba(255,180,0,0.12); border:1px solid rgba(255,180,0,0.35);
+            color:rgba(255,220,80,0.9); font-size:0.82rem; line-height:1.5;
+            display:none;
+        }
+        .notice-preview.active { display:block; }
+        .notice-preview::before { content:'⚠ '; }
+
         /* chart column */
         .chart-col  { flex:1; display:flex; flex-direction:column; cursor:default; }
         .chart-bars { flex:1; display:flex; flex-direction:column; justify-content:flex-end; }
@@ -658,6 +680,18 @@
         <div class="glass dash-header">
             <h1>🔐 Admin Dashboard</h1>
             <button id="logoutBtn" class="btn btn-danger btn-sm">Logout</button>
+        </div>
+
+        <!-- Notice -->
+        <div class="glass panel notice-panel">
+            <div class="section-title">📢 Public Notice</div>
+            <div id="noticePreview" class="notice-preview"></div>
+            <textarea id="noticeText" placeholder="Leave blank to show no notice. Example: DoorOpener is currently unavailable — a replacement part is on the way."></textarea>
+            <div class="notice-actions">
+                <button id="btnSaveNotice" class="btn btn-primary btn-sm">Save Notice</button>
+                <button id="btnClearNotice" class="btn btn-danger btn-sm">Clear</button>
+                <span id="noticeStatus" class="notice-status">Saved.</span>
+            </div>
         </div>
 
         <!-- Stats -->
@@ -850,8 +884,64 @@
         isAuthenticated = true;
         document.getElementById('loginForm').style.display = 'none';
         document.getElementById('dashboard').style.display = 'block';
-        await Promise.all([loadLogs(), loadUsers()]);
+        await Promise.all([loadLogs(), loadUsers(), loadNotice()]);
     }
+
+    async function loadNotice() {
+        try {
+            const res = await fetch('/admin/notice', { credentials: 'same-origin', cache: 'no-store' });
+            const data = await res.json();
+            const text = data.notice || '';
+            document.getElementById('noticeText').value = text;
+            updateNoticePreview(text);
+        } catch (_) {}
+    }
+
+    function updateNoticePreview(text) {
+        const el = document.getElementById('noticePreview');
+        if (text.trim()) {
+            el.textContent = text.trim();
+            el.classList.add('active');
+        } else {
+            el.textContent = '';
+            el.classList.remove('active');
+        }
+    }
+
+    document.getElementById('noticeText').addEventListener('input', function() {
+        updateNoticePreview(this.value);
+    });
+
+    document.getElementById('btnSaveNotice').addEventListener('click', async function() {
+        const text = document.getElementById('noticeText').value.trim();
+        const statusEl = document.getElementById('noticeStatus');
+        try {
+            const res = await fetch('/admin/notice', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+                body: JSON.stringify({ notice: text })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                statusEl.textContent = text ? 'Notice saved.' : 'Notice cleared.';
+                statusEl.classList.add('visible');
+                setTimeout(() => statusEl.classList.remove('visible'), 2500);
+                updateNoticePreview(data.notice || '');
+            } else {
+                statusEl.textContent = data.error || 'Error saving.';
+                statusEl.classList.add('visible');
+            }
+        } catch (_) {
+            statusEl.textContent = 'Network error.';
+            statusEl.classList.add('visible');
+        }
+    });
+
+    document.getElementById('btnClearNotice').addEventListener('click', async function() {
+        document.getElementById('noticeText').value = '';
+        document.getElementById('btnSaveNotice').click();
+    });
 
     function showLogin() {
         document.getElementById('loginForm').style.display = 'block';

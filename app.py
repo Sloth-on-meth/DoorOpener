@@ -388,6 +388,7 @@ def after_request(response):
 def index():
     easter_egg_enabled = config.getboolean("server", "67mode", fallback=False)
     page_title = config.get("server", "page_title", fallback="").strip()
+    notice = config.get("server", "notice", fallback="").strip()
     return render_template(
         "index.html",
         oidc_enabled=bool(oauth),
@@ -396,6 +397,7 @@ def index():
         app_version=APP_VERSION,
         csp_nonce=g.csp_nonce,
         page_title=page_title,
+        notice=notice,
     )
 
 
@@ -1263,6 +1265,35 @@ def admin_logout():
     session.pop("admin_csrf_token", None)
     session.permanent = False
     return jsonify({"status": "success", "message": "Logged out successfully"})
+
+
+@app.route("/admin/notice", methods=["GET"])
+def admin_notice_get():
+    """Return the current public notice (no auth required — displayed on keypad page)."""
+    notice = config.get("server", "notice", fallback="").strip()
+    return jsonify({"notice": notice})
+
+
+@app.route("/admin/notice", methods=["POST"])
+def admin_notice_set():
+    """Set or clear the public notice. Requires admin auth."""
+    if not _require_admin_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    if not _check_admin_csrf():
+        return jsonify({"error": "Invalid CSRF token"}), 403
+    data = request.get_json(silent=True) or {}
+    notice = data.get("notice", "").strip()
+    if not config.has_section("server"):
+        config.add_section("server")
+    if notice:
+        config.set("server", "notice", notice)
+    else:
+        config.remove_option("server", "notice")
+    try:
+        save_config()
+    except OSError as e:
+        return jsonify({"error": f"Could not save config: {e}"}), 500
+    return jsonify({"status": "ok", "notice": notice})
 
 
 @app.route("/auth/status")

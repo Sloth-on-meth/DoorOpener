@@ -808,6 +808,26 @@
             background: rgba(255, 255, 255, 0.2);
         }
 
+        /* Notice banner */
+        #notice-banner {
+            width: 100%;
+            box-sizing: border-box;
+            margin-bottom: 1.25rem;
+            padding: 0.75rem 1rem;
+            background: rgba(255, 180, 0, 0.15);
+            border: 1px solid rgba(255, 180, 0, 0.4);
+            border-radius: 12px;
+            backdrop-filter: blur(8px);
+            color: rgba(255, 220, 80, 0.95);
+            font-size: 0.82rem;
+            font-weight: 500;
+            line-height: 1.5;
+            text-align: center;
+        }
+        #notice-banner::before {
+            content: '⚠ ';
+        }
+
         /* PIN display */
         #pinDisplay {
             width: 300px;
@@ -1057,6 +1077,9 @@
         <div id="accessGrantedPopup" class="access-popup granted">Access Granted</div>
         {% if page_title %}
         <div id="page-title">{{ page_title }}</div>
+        {% endif %}
+        {% if notice %}
+        <div id="notice-banner">{{ notice }}</div>
         {% endif %}
         <!-- PIN Display -->
         <div id="pinDisplay">
