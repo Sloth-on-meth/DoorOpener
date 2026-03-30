@@ -24,8 +24,10 @@
             position: fixed;
             inset: 0;
             z-index: 0;
-            background: url('/static/background.jpg') no-repeat center center fixed;
-            background-size: cover;
+            background:
+                url('/static/background.jpg') no-repeat center center fixed,
+                linear-gradient(135deg, #1a1a2e 0%, #16213e 40%, #0f3460 100%);
+            background-size: cover, cover;
             pointer-events: none;
         }
 
@@ -643,6 +645,31 @@
         .notice-preview.active { display:block; }
         .notice-preview::before { content:'⚠ '; }
 
+        /* background panel */
+        .bg-panel { display:flex; flex-direction:column; gap:12px; }
+        .bg-preview-wrap {
+            position:relative; width:100%; max-width:340px; border-radius:10px;
+            overflow:hidden; border:1px solid rgba(255,255,255,0.18);
+            background:rgba(0,0,0,0.3); aspect-ratio:16/9;
+        }
+        .bg-preview-wrap img {
+            width:100%; height:100%; object-fit:cover; display:block;
+            transition:opacity 0.3s;
+        }
+        .bg-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+        .bg-file-label {
+            display:inline-flex; align-items:center; gap:6px;
+            padding:6px 14px; border-radius:8px; font-size:0.82rem; font-weight:600;
+            cursor:pointer; background:rgba(255,255,255,0.12);
+            border:1px solid rgba(255,255,255,0.22); color:#fff;
+            transition:background 0.2s;
+        }
+        .bg-file-label:hover { background:rgba(255,255,255,0.2); }
+        .bg-file-input { display:none; }
+        .bg-status { font-size:0.78rem; color:rgba(102,187,106,0.85); margin-left:auto; opacity:0; transition:opacity 0.4s; }
+        .bg-status.visible { opacity:1; }
+        .bg-status.error { color:rgba(239,83,80,0.9); }
+
         /* chart column */
         .chart-col  { flex:1; display:flex; flex-direction:column; cursor:default; }
         .chart-bars { flex:1; display:flex; flex-direction:column; justify-content:flex-end; }
@@ -691,6 +718,21 @@
                 <button id="btnSaveNotice" class="btn btn-primary btn-sm">Save Notice</button>
                 <button id="btnClearNotice" class="btn btn-danger btn-sm">Clear</button>
                 <span id="noticeStatus" class="notice-status">Saved.</span>
+            </div>
+        </div>
+
+        <!-- Background -->
+        <div class="glass panel bg-panel">
+            <div class="section-title">🖼 Background Image</div>
+            <div class="bg-preview-wrap">
+                <img id="bgPreviewImg" src="/static/background.jpg" alt="Current background">
+            </div>
+            <div class="bg-actions">
+                <label class="bg-file-label" for="bgFileInput">📁 Choose image…</label>
+                <input class="bg-file-input" type="file" id="bgFileInput" accept="image/jpeg,image/png,image/gif,image/webp">
+                <button id="btnUploadBg" class="btn btn-primary btn-sm" disabled>Upload</button>
+                <button id="btnResetBg" class="btn btn-danger btn-sm">Reset to default</button>
+                <span id="bgStatus" class="bg-status"></span>
             </div>
         </div>
 
@@ -941,6 +983,76 @@
     document.getElementById('btnClearNotice').addEventListener('click', async function() {
         document.getElementById('noticeText').value = '';
         document.getElementById('btnSaveNotice').click();
+    });
+
+    // --- Background image ---
+    const bgFileInput = document.getElementById('bgFileInput');
+    const btnUploadBg = document.getElementById('btnUploadBg');
+    const btnResetBg = document.getElementById('btnResetBg');
+    const bgPreviewImg = document.getElementById('bgPreviewImg');
+    const bgStatus = document.getElementById('bgStatus');
+
+    function showBgStatus(msg, isError) {
+        bgStatus.textContent = msg;
+        bgStatus.classList.toggle('error', !!isError);
+        bgStatus.classList.add('visible');
+        if (!isError) setTimeout(() => bgStatus.classList.remove('visible'), 2500);
+    }
+
+    bgFileInput.addEventListener('change', function() {
+        const file = this.files[0];
+        if (!file) { btnUploadBg.disabled = true; return; }
+        btnUploadBg.disabled = false;
+        const reader = new FileReader();
+        reader.onload = e => { bgPreviewImg.src = e.target.result; };
+        reader.readAsDataURL(file);
+    });
+
+    btnUploadBg.addEventListener('click', async function() {
+        const file = bgFileInput.files[0];
+        if (!file) return;
+        const formData = new FormData();
+        formData.append('file', file);
+        btnUploadBg.disabled = true;
+        try {
+            const res = await fetch('/admin/background', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'X-CSRF-Token': csrfToken },
+                body: formData
+            });
+            const data = await res.json();
+            if (res.ok) {
+                showBgStatus('Background updated.');
+                bgFileInput.value = '';
+            } else {
+                showBgStatus(data.error || 'Upload failed.', true);
+                btnUploadBg.disabled = false;
+            }
+        } catch (_) {
+            showBgStatus('Network error.', true);
+            btnUploadBg.disabled = false;
+        }
+    });
+
+    btnResetBg.addEventListener('click', async function() {
+        if (!confirm('Reset background to the original default image?')) return;
+        try {
+            const res = await fetch('/admin/background', {
+                method: 'DELETE',
+                credentials: 'same-origin',
+                headers: { 'X-CSRF-Token': csrfToken }
+            });
+            const data = await res.json();
+            if (res.ok) {
+                bgPreviewImg.src = '/static/background.jpg?t=' + Date.now();
+                showBgStatus('Reset to default.');
+            } else {
+                showBgStatus(data.error || 'Reset failed.', true);
+            }
+        } catch (_) {
+            showBgStatus('Network error.', true);
+        }
     });
 
     function showLogin() {

@@ -7,10 +7,12 @@ enhanced multi-layer security, timezone support, and comprehensive brute force p
 """
 
 import hmac
+import imghdr
 import json
 import logging
 import os
 import secrets
+import shutil
 import tempfile
 import time
 import traceback
@@ -257,6 +259,20 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
+
+# --- Background image paths ---
+STATIC_DIR = os.path.join(app.root_path, "static")
+BACKGROUND_PATH = os.path.join(STATIC_DIR, "background.jpg")
+BACKGROUND_DEFAULT_PATH = os.path.join(STATIC_DIR, "background_default.jpg")
+ALLOWED_IMAGE_TYPES = {"jpeg", "png", "gif", "webp"}
+MAX_BACKGROUND_SIZE = 10 * 1024 * 1024  # 10 MB
+
+# Preserve the default background on first run so it can be restored later
+if os.path.exists(BACKGROUND_PATH) and not os.path.exists(BACKGROUND_DEFAULT_PATH):
+    try:
+        shutil.copy2(BACKGROUND_PATH, BACKGROUND_DEFAULT_PATH)
+    except OSError:
+        pass
 
 
 @app.route("/service-worker.js")
@@ -1304,6 +1320,85 @@ def admin_notice_set():
     except OSError as e:
         return jsonify({"error": f"Could not save config: {e}"}), 500
     return jsonify({"status": "ok", "notice": notice})
+
+
+@app.route("/admin/background", methods=["GET"])
+def admin_background_get():
+    """Return whether a custom background is currently set."""
+    has_custom = os.path.exists(BACKGROUND_DEFAULT_PATH) and not _backgrounds_are_identical()
+    return jsonify({"custom": has_custom})
+
+
+def _backgrounds_are_identical() -> bool:
+    """Return True if the current background matches the default (byte-for-byte)."""
+    if not os.path.exists(BACKGROUND_DEFAULT_PATH):
+        return False
+    try:
+        with open(BACKGROUND_PATH, "rb") as f1, open(BACKGROUND_DEFAULT_PATH, "rb") as f2:
+            return f1.read() == f2.read()
+    except OSError:
+        return False
+
+
+@app.route("/admin/background", methods=["POST"])
+def admin_background_upload():
+    """Upload a new background image. Requires admin auth."""
+    if not _require_admin_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    if not _check_admin_csrf():
+        return jsonify({"error": "Invalid CSRF token"}), 403
+
+    if "file" not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"error": "No file selected"}), 400
+
+    # Read the file data
+    data = f.read(MAX_BACKGROUND_SIZE + 1)
+    if len(data) > MAX_BACKGROUND_SIZE:
+        return jsonify({"error": "File too large (max 10 MB)"}), 413
+
+    # Validate it's actually an image
+    img_type = imghdr.what(None, h=data)
+    if img_type not in ALLOWED_IMAGE_TYPES:
+        return jsonify({"error": "Invalid image type. Allowed: JPEG, PNG, GIF, WebP"}), 415
+
+    # Write atomically via temp file
+    try:
+        fd, tmp_path = tempfile.mkstemp(dir=STATIC_DIR)
+        try:
+            with os.fdopen(fd, "wb") as tmp:
+                tmp.write(data)
+            os.replace(tmp_path, BACKGROUND_PATH)
+        except Exception:
+            os.unlink(tmp_path)
+            raise
+    except OSError as e:
+        return jsonify({"error": f"Could not save background: {e}"}), 500
+
+    logger.info(f"Background image updated by admin ({len(data)} bytes, type={img_type})")
+    return jsonify({"status": "ok"})
+
+
+@app.route("/admin/background", methods=["DELETE"])
+def admin_background_reset():
+    """Reset the background image to the original default. Requires admin auth."""
+    if not _require_admin_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    if not _check_admin_csrf():
+        return jsonify({"error": "Invalid CSRF token"}), 403
+
+    if not os.path.exists(BACKGROUND_DEFAULT_PATH):
+        return jsonify({"error": "No default background to restore"}), 404
+
+    try:
+        shutil.copy2(BACKGROUND_DEFAULT_PATH, BACKGROUND_PATH)
+    except OSError as e:
+        return jsonify({"error": f"Could not restore default: {e}"}), 500
+
+    logger.info("Background image reset to default by admin")
+    return jsonify({"status": "ok"})
 
 
 @app.route("/report-problem", methods=["POST"])

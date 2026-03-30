@@ -40,8 +40,10 @@
             right: 0;
             bottom: 0;
             z-index: 0;
-            background: url('/static/background.jpg') no-repeat center center fixed;
-            background-size: cover;
+            background:
+                url('/static/background.jpg') no-repeat center center fixed,
+                linear-gradient(135deg, #1a1a2e 0%, #16213e 40%, #0f3460 100%);
+            background-size: cover, cover;
             opacity: 0.92;
             pointer-events: none;
         }
@@ -990,27 +992,39 @@
 
         /* Report button */
         .report-btn {
-            display: flex;
+            display: inline-flex;
             align-items: center;
-            justify-content: center;
-            width: 48px;
-            height: 48px;
-            background: rgba(255, 255, 255, 0.25);
-            border-radius: 50%;
-            backdrop-filter: blur(8px);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            color: rgba(0, 0, 0, 0.7);
+            gap: 6px;
+            background: rgba(220, 38, 38, 0.18);
+            border: 1px solid rgba(220, 38, 38, 0.45);
+            border-radius: 20px;
+            padding: 7px 14px;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 0.78rem;
+            font-weight: 600;
             cursor: pointer;
-            transition: background 0.2s ease, transform 0.2s ease;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            font-size: 20px;
-            line-height: 1;
+            backdrop-filter: blur(8px);
+            transition: background 0.2s ease, transform 0.15s ease;
+            white-space: nowrap;
         }
         .report-btn:hover,
         .report-btn:focus {
-            background: rgba(255, 200, 80, 0.35);
-            transform: scale(1.05);
+            background: rgba(220, 38, 38, 0.35);
+            transform: scale(1.03);
             outline: none;
+        }
+        .report-btn-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            background: rgba(220, 38, 38, 0.85);
+            border-radius: 50%;
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: #fff;
+            flex-shrink: 0;
         }
 
         /* Report modal */
@@ -1156,8 +1170,7 @@
             }
 
             #battery-container,
-            .github-btn,
-            .report-btn {
+            .github-btn {
                 background: rgba(0, 0, 0, 0.35);
                 border-color: rgba(255, 255, 255, 0.12);
                 color: rgba(255, 255, 255, 0.7);
@@ -1165,9 +1178,7 @@
 
             #battery-container:hover,
             .github-btn:hover,
-            .github-btn:focus,
-            .report-btn:hover,
-            .report-btn:focus {
+            .github-btn:focus {
                 background: rgba(0, 0, 0, 0.5);
             }
 
@@ -1246,7 +1257,10 @@
             </svg>
         </a>
         {% if pushbullet_enabled %}
-        <button class="report-btn" id="reportProblemBtn" title="Report a problem">⚑</button>
+        <button class="report-btn" id="reportProblemBtn">
+            <span class="report-btn-icon">!</span>
+            Door not opening? Report the issue here
+        </button>
         {% endif %}
     </div>
 
@@ -1254,9 +1268,9 @@
     <!-- Report a problem modal -->
     <div class="report-modal-overlay" id="reportModalOverlay">
         <div class="report-modal">
-            <h3>Report a Problem</h3>
+            <h3><span style="color:rgba(220,38,38,0.9)">!</span> Report a Problem</h3>
             <p>Describe the issue and it will be sent to the admin.</p>
-            <textarea id="reportMessage" placeholder="e.g. Door doesn't respond, keypad not working…" maxlength="500"></textarea>
+            <textarea id="reportMessage" placeholder="e.g. Door doesn't respond, keypad not working…" maxlength="500" autocomplete="off"></textarea>
             <div class="report-modal-msg" id="reportMsg"></div>
             <div class="report-modal-actions">
                 <button id="reportCancelBtn">Cancel</button>
@@ -1977,6 +1991,10 @@
 
             // Add keyboard support; ignore auto-repeat when key is held down
             document.addEventListener('keydown', function (event) {
+                // Don't intercept keys while focus is inside a text input/textarea
+                const tag = document.activeElement && document.activeElement.tagName;
+                if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
                 if (event.repeat) {
                     event.preventDefault();
                     return;

@@ -1,6 +1,9 @@
 # Configuration files with sensitive information
 config.ini
 
+#background file
+/static/background.jpg
+
 # Python-related files
 __pycache__/
 *.py[cod]
