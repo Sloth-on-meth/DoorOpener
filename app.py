@@ -232,6 +232,15 @@ session_failed_attempts = defaultdict(int)
 session_blocked_until = defaultdict(lambda: None)
 global_failed_attempts = 0
 global_last_reset = get_current_time()
+
+# Pushbullet configuration
+pushbullet_token = config.get("pushbullet", "api_token", fallback="").strip()
+
+# Rate limiting for problem reports: max 3 per IP per hour
+_report_timestamps: dict[str, list] = defaultdict(list)
+REPORT_LIMIT = 3
+REPORT_WINDOW = timedelta(hours=1)
+
 # Load security settings from config
 MAX_ATTEMPTS = config.getint("security", "max_attempts", fallback=5)
 BLOCK_TIME = timedelta(minutes=config.getint("security", "block_time_minutes", fallback=5))
@@ -398,6 +407,7 @@ def index():
         csp_nonce=g.csp_nonce,
         page_title=page_title,
         notice=notice,
+        pushbullet_enabled=bool(pushbullet_token),
     )
 
 
@@ -1294,6 +1304,43 @@ def admin_notice_set():
     except OSError as e:
         return jsonify({"error": f"Could not save config: {e}"}), 500
     return jsonify({"status": "ok", "notice": notice})
+
+
+@app.route("/report-problem", methods=["POST"])
+def report_problem():
+    """Send a problem report to the admin via Pushbullet."""
+    if not pushbullet_token:
+        return jsonify({"error": "Notifications not configured"}), 503
+
+    data = request.get_json(silent=True) or {}
+    message = data.get("message", "").strip()
+    if not message:
+        return jsonify({"error": "Message is required"}), 400
+    if len(message) > 500:
+        return jsonify({"error": "Message too long (max 500 characters)"}), 400
+
+    ip = request.remote_addr or "unknown"
+    now = get_current_time()
+    cutoff = now - REPORT_WINDOW
+    _report_timestamps[ip] = [t for t in _report_timestamps[ip] if t > cutoff]
+    if len(_report_timestamps[ip]) >= REPORT_LIMIT:
+        return jsonify({"error": "Too many reports — please wait before sending another"}), 429
+    _report_timestamps[ip].append(now)
+
+    try:
+        resp = requests.post(
+            "https://api.pushbullet.com/v2/pushes",
+            headers={"Access-Token": pushbullet_token, "Content-Type": "application/json"},
+            json={"type": "note", "title": "DoorOpener: Problem Report", "body": message},
+            timeout=8,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        logger.error(f"Pushbullet report failed: {e}")
+        return jsonify({"error": "Failed to send notification"}), 502
+
+    logger.info(f"Problem report sent from {ip}: {message[:80]}")
+    return jsonify({"status": "ok"})
 
 
 @app.route("/auth/status")

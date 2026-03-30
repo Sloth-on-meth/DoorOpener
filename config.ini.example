@@ -29,6 +29,12 @@ port = 6532
 # Test mode - when true, shows success message but doesn't actually open door
 test_mode = false
 
+[pushbullet]
+# Pushbullet API token for "Report a Problem" notifications
+# Get yours at https://www.pushbullet.com/#settings/account
+# Leave empty to disable the report button
+api_token =
+
 [security]
 # Maximum failed attempts per IP before blocking
 max_attempts = 5
