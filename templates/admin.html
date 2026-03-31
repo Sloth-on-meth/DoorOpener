@@ -180,11 +180,10 @@
         /* === STATS === */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(2, 1fr);
             gap: 0.75rem;
-            margin-bottom: 1rem;
+            margin-bottom: 0;
         }
-        @media (max-width: 700px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
 
         .stat-card {
             padding: 1.2rem 1.3rem;
@@ -222,6 +221,24 @@
         .stat-success .stat-value { color: #69f0ae; }
         .stat-danger .stat-value  { color: #ff5252; }
         .stat-gold .stat-value    { color: #ffd740; }
+
+        /* === DASH ROWS === */
+        .dash-row {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            align-items: stretch;
+        }
+        .dash-col-notice { flex: 1 1 0; min-width: 0; }
+        .dash-col-bg     { flex: 0 0 340px; min-width: 0; }
+        .dash-row-bottom { align-items: flex-start; }
+        .dash-col-stats  { flex: 0 0 auto; }
+        .dash-col-lb     { flex: 1 1 0; min-width: 0; margin-bottom: 0; }
+        @media (max-width: 900px) {
+            .dash-row { flex-direction: column; }
+            .dash-col-bg { flex: 1 1 auto; }
+            .dash-col-stats { flex: 1 1 auto; }
+        }
 
         /* === LEADERBOARD === */
         .leaderboard {
@@ -711,61 +728,65 @@
             <button id="logoutBtn" class="btn btn-danger btn-sm">Logout</button>
         </div>
 
-        <!-- Notice -->
-        <div class="glass panel notice-panel">
-            <div class="section-title">📢 Public Notice</div>
-            <div id="noticePreview" class="notice-preview"></div>
-            <textarea id="noticeText" placeholder="Leave blank to show no notice. Example: DoorOpener is currently unavailable — a replacement part is on the way."></textarea>
-            <div class="notice-actions">
-                <button id="btnSaveNotice" class="btn btn-primary btn-sm">Save Notice</button>
-                <button id="btnClearNotice" class="btn btn-danger btn-sm">Clear</button>
-                <span id="noticeStatus" class="notice-status">Saved.</span>
-            </div>
-        </div>
-
-        <!-- Background -->
-        <div class="glass panel bg-panel">
-            <div class="section-title">🖼 Background Image</div>
-            <div class="bg-body">
-                <div class="bg-preview-wrap">
-                    <img id="bgPreviewImg" src="/static/background.jpg" alt="Current background">
+        <!-- Row 1: Notice + Background -->
+        <div class="dash-row">
+            <div class="glass panel notice-panel dash-col-notice">
+                <div class="section-title">📢 Public Notice</div>
+                <div id="noticePreview" class="notice-preview"></div>
+                <textarea id="noticeText" placeholder="Leave blank to show no notice. Example: DoorOpener is currently unavailable — a replacement part is on the way."></textarea>
+                <div class="notice-actions">
+                    <button id="btnSaveNotice" class="btn btn-primary btn-sm">Save Notice</button>
+                    <button id="btnClearNotice" class="btn btn-danger btn-sm">Clear</button>
+                    <span id="noticeStatus" class="notice-status">Saved.</span>
                 </div>
-                <div class="bg-controls">
-                    <div class="bg-actions">
-                        <label class="bg-file-label" for="bgFileInput">📁 Choose image…</label>
-                        <input class="bg-file-input" type="file" id="bgFileInput" accept="image/jpeg,image/png,image/gif,image/webp">
-                        <button id="btnUploadBg" class="btn btn-primary btn-sm" disabled>Upload</button>
-                        <button id="btnResetBg" class="btn btn-danger btn-sm">Reset to default</button>
+            </div>
+
+            <div class="glass panel bg-panel dash-col-bg">
+                <div class="section-title">🖼 Background Image</div>
+                <div class="bg-body">
+                    <div class="bg-preview-wrap">
+                        <img id="bgPreviewImg" src="/static/background.jpg" alt="Current background">
                     </div>
-                    <span id="bgStatus" class="bg-status"></span>
+                    <div class="bg-controls">
+                        <div class="bg-actions">
+                            <label class="bg-file-label" for="bgFileInput">📁 Choose image…</label>
+                            <input class="bg-file-input" type="file" id="bgFileInput" accept="image/jpeg,image/png,image/gif,image/webp">
+                            <button id="btnUploadBg" class="btn btn-primary btn-sm" disabled>Upload</button>
+                            <button id="btnResetBg" class="btn btn-danger btn-sm">Reset to default</button>
+                        </div>
+                        <span id="bgStatus" class="bg-status"></span>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Stats -->
-        <div class="stats-grid">
-            <div class="glass stat-card stat-info">
-                <div class="stat-value" id="statTotal">—</div>
-                <div class="stat-label">Total Attempts</div>
+        <!-- Row 2: Stats + Leaderboard -->
+        <div class="dash-row dash-row-bottom">
+            <div class="dash-col-stats">
+                <div class="stats-grid">
+                    <div class="glass stat-card stat-info">
+                        <div class="stat-value" id="statTotal">—</div>
+                        <div class="stat-label">Total Attempts</div>
+                    </div>
+                    <div class="glass stat-card stat-success">
+                        <div class="stat-value" id="statSuccess">—</div>
+                        <div class="stat-label">Successful</div>
+                    </div>
+                    <div class="glass stat-card stat-danger">
+                        <div class="stat-value" id="statFailed">—</div>
+                        <div class="stat-label">Failed</div>
+                    </div>
+                    <div class="glass stat-card stat-gold">
+                        <div class="stat-value" id="statRate">—</div>
+                        <div class="stat-label">Success Rate</div>
+                    </div>
+                </div>
             </div>
-            <div class="glass stat-card stat-success">
-                <div class="stat-value" id="statSuccess">—</div>
-                <div class="stat-label">Successful</div>
-            </div>
-            <div class="glass stat-card stat-danger">
-                <div class="stat-value" id="statFailed">—</div>
-                <div class="stat-label">Failed</div>
-            </div>
-            <div class="glass stat-card stat-gold">
-                <div class="stat-value" id="statRate">—</div>
-                <div class="stat-label">Success Rate</div>
-            </div>
-        </div>
 
-        <!-- Leaderboard -->
-        <div class="glass leaderboard" id="leaderboardSection">
-            <div class="section-title">🏆 Top Users — Times Used</div>
-            <div id="leaderboardRows"></div>
+            <div class="glass leaderboard dash-col-lb" id="leaderboardSection">
+                <div class="section-title">🏆 Top Users — Times Used</div>
+                <div id="leaderboardRows"></div>
+            </div>
         </div>
 
         <!-- Tabs -->
