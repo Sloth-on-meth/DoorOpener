@@ -325,6 +325,15 @@
             text-underline-offset: 2px;
         }
 
+        .toast.warn {
+            border-left-color: #ffb300;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.36), 0 0 0 1px rgba(255, 179, 0, 0.12), inset 3px 0 24px rgba(255, 179, 0, 0.07);
+        }
+        .toast.warn::before {
+            content: '↙';
+            color: #ffb300;
+        }
+
         .toast.show {
             opacity: 1;
             transform: translateY(0);
@@ -961,7 +970,8 @@
             bottom: 20px;
             left: 20px;
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
+            align-items: center;
             gap: 10px;
             z-index: 1000;
         }
@@ -1301,6 +1311,8 @@
         let autoSubmitTimer = null;
         let blockCountdownTimer = null;
         let sendingDotsInterval = null;
+        let consecutiveSuccesses = 0;
+        let reportHintShown = false;
 
         function startSendingDots(display) {
             let count = 0;
@@ -1534,6 +1546,7 @@
                         }
                         showAccessPopup('accessGrantedPopup', userName);
                         flashContainer('grant');
+                        onDoorSuccess();
                     } else {
                         if ((status === 429 || status === 401) && data && data.blocked_until) {
                             startBlockCountdown(data.blocked_until);
@@ -1551,6 +1564,7 @@
                             // Enhanced failure vibration pattern: strong buzz with pauses
                             window.navigator.vibrate([200, 100, 200, 100, 300]);
                         }
+                        onDoorFailure();
                     }
                 })
                 .catch(error => {
@@ -1598,6 +1612,7 @@
                         showAccessPopup('accessGrantedPopup', userName);
                         flashContainer('grant');
                         if (window.navigator.vibrate) window.navigator.vibrate([50, 30, 150, 50, 80, 30, 200]);
+                        onDoorSuccess();
                     } else {
                         if ((status === 429 || status === 401) && data && data.blocked_until) {
                             startBlockCountdown(data.blocked_until);
@@ -1609,6 +1624,7 @@
                         showAccessPopup('accessDeniedPopup', null, data && data.message ? data.message : 'Access Denied');
                         flashContainer('deny');
                         if (window.navigator.vibrate) window.navigator.vibrate([200, 100, 200, 100, 300]);
+                        onDoorFailure();
                     }
                 })
                 .catch(() => showStatus('Error: Could not connect to server', 'error'))
@@ -1627,6 +1643,29 @@
 
         function escapeHtml(str) {
             return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function onDoorSuccess() {
+            consecutiveSuccesses++;
+            {% if pushbullet_enabled %}
+            if (!reportHintShown && consecutiveSuccesses >= 2) {
+                reportHintShown = true;
+                const toastContainer = document.getElementById('toast-container');
+                const toast = document.createElement('div');
+                toast.className = 'toast warn';
+                toast.textContent = 'Door not opening? Report the issue in the bottom left';
+                toastContainer.appendChild(toast);
+                setTimeout(() => toast.classList.add('show'), 10);
+                setTimeout(() => {
+                    toast.classList.remove('show');
+                    setTimeout(() => toast.remove(), 500);
+                }, 6000);
+            }
+            {% endif %}
+        }
+
+        function onDoorFailure() {
+            consecutiveSuccesses = 0;
         }
 
         function showStatus(message, type, persistent) {

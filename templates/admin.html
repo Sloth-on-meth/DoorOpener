@@ -36,7 +36,7 @@
             position: fixed;
             inset: 0;
             z-index: 0;
-            background: rgba(6, 8, 18, 0.18);
+            background: rgba(6, 8, 18, 0.52);
             pointer-events: none;
         }
 
@@ -49,12 +49,12 @@
 
         /* === GLASS === */
         .glass {
-            background: linear-gradient(135deg, rgba(255,255,255,0.13), rgba(255,255,255,0.05));
-            border: 1px solid rgba(255,255,255,0.22);
+            background: linear-gradient(135deg, rgba(255,255,255,0.11), rgba(10,12,30,0.55));
+            border: 1px solid rgba(255,255,255,0.16);
             border-radius: 18px;
-            backdrop-filter: blur(28px) saturate(1.6);
-            -webkit-backdrop-filter: blur(28px) saturate(1.6);
-            box-shadow: 0 8px 32px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.2);
+            backdrop-filter: blur(32px) saturate(1.5);
+            -webkit-backdrop-filter: blur(32px) saturate(1.5);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.14);
         }
 
         /* === GITHUB === */
@@ -166,8 +166,8 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 1.4rem 1.8rem;
-            margin-bottom: 1.4rem;
+            padding: 1.1rem 1.4rem;
+            margin-bottom: 1rem;
         }
         .dash-header h1 {
             margin: 0;
@@ -181,8 +181,8 @@
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
-            gap: 1rem;
-            margin-bottom: 1.4rem;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
         }
         @media (max-width: 700px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
 
@@ -225,16 +225,15 @@
 
         /* === LEADERBOARD === */
         .leaderboard {
-            padding: 1.4rem 1.6rem;
-            margin-bottom: 1.4rem;
+            padding: 1.1rem 1.4rem;
+            margin-bottom: 1rem;
         }
 
         .section-title {
-            font-size: 0.72rem;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            color: rgba(255,255,255,0.4);
-            margin-bottom: 1.1rem;
+            font-size: 0.92rem;
+            letter-spacing: 0.01em;
+            color: rgba(255,255,255,0.82);
+            margin-bottom: 1rem;
             font-weight: 700;
         }
 
@@ -277,7 +276,7 @@
             padding: 5px;
             background: rgba(0,0,0,0.25);
             border-radius: 13px;
-            margin-bottom: 1.4rem;
+            margin-bottom: 1rem;
             border: 1px solid rgba(255,255,255,0.07);
         }
         .tab-btn {
@@ -301,8 +300,8 @@
 
         /* === PANEL === */
         .panel {
-            padding: 1.4rem 1.6rem;
-            margin-bottom: 1.4rem;
+            padding: 1.1rem 1.4rem;
+            margin-bottom: 1rem;
         }
 
         /* === CONTROLS === */
@@ -624,11 +623,11 @@
         .modal-code { color:#ffd740; }
 
         /* notice panel */
-        .notice-panel { display:flex; flex-direction:column; gap:10px; }
+        .notice-panel { display:flex; flex-direction:column; gap:8px; }
         .notice-panel textarea {
-            width:100%; box-sizing:border-box; min-height:72px; resize:vertical;
+            width:100%; box-sizing:border-box; min-height:52px; resize:vertical;
             background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.18);
-            border-radius:10px; color:#fff; font-size:0.88rem; padding:10px 12px;
+            border-radius:10px; color:#fff; font-size:0.88rem; padding:9px 12px;
             font-family:inherit; outline:none; transition:border-color 0.2s;
         }
         .notice-panel textarea:focus { border-color:rgba(255,180,0,0.55); }
@@ -646,9 +645,10 @@
         .notice-preview::before { content:'⚠ '; }
 
         /* background panel */
-        .bg-panel { display:flex; flex-direction:column; gap:12px; }
+        .bg-panel { display:flex; flex-direction:column; gap:10px; }
+        .bg-body { display:flex; gap:16px; align-items:flex-start; }
         .bg-preview-wrap {
-            position:relative; width:100%; max-width:340px; border-radius:10px;
+            flex-shrink:0; width:180px; border-radius:10px;
             overflow:hidden; border:1px solid rgba(255,255,255,0.18);
             background:rgba(0,0,0,0.3); aspect-ratio:16/9;
         }
@@ -656,6 +656,7 @@
             width:100%; height:100%; object-fit:cover; display:block;
             transition:opacity 0.3s;
         }
+        .bg-controls { display:flex; flex-direction:column; gap:10px; justify-content:center; flex:1; }
         .bg-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
         .bg-file-label {
             display:inline-flex; align-items:center; gap:6px;
@@ -666,9 +667,10 @@
         }
         .bg-file-label:hover { background:rgba(255,255,255,0.2); }
         .bg-file-input { display:none; }
-        .bg-status { font-size:0.78rem; color:rgba(102,187,106,0.85); margin-left:auto; opacity:0; transition:opacity 0.4s; }
+        .bg-status { font-size:0.78rem; color:rgba(102,187,106,0.85); opacity:0; transition:opacity 0.4s; }
         .bg-status.visible { opacity:1; }
         .bg-status.error { color:rgba(239,83,80,0.9); }
+        @media (max-width: 500px) { .bg-body { flex-direction:column; } .bg-preview-wrap { width:100%; } }
 
         /* chart column */
         .chart-col  { flex:1; display:flex; flex-direction:column; cursor:default; }
@@ -724,15 +726,19 @@
         <!-- Background -->
         <div class="glass panel bg-panel">
             <div class="section-title">🖼 Background Image</div>
-            <div class="bg-preview-wrap">
-                <img id="bgPreviewImg" src="/static/background.jpg" alt="Current background">
-            </div>
-            <div class="bg-actions">
-                <label class="bg-file-label" for="bgFileInput">📁 Choose image…</label>
-                <input class="bg-file-input" type="file" id="bgFileInput" accept="image/jpeg,image/png,image/gif,image/webp">
-                <button id="btnUploadBg" class="btn btn-primary btn-sm" disabled>Upload</button>
-                <button id="btnResetBg" class="btn btn-danger btn-sm">Reset to default</button>
-                <span id="bgStatus" class="bg-status"></span>
+            <div class="bg-body">
+                <div class="bg-preview-wrap">
+                    <img id="bgPreviewImg" src="/static/background.jpg" alt="Current background">
+                </div>
+                <div class="bg-controls">
+                    <div class="bg-actions">
+                        <label class="bg-file-label" for="bgFileInput">📁 Choose image…</label>
+                        <input class="bg-file-input" type="file" id="bgFileInput" accept="image/jpeg,image/png,image/gif,image/webp">
+                        <button id="btnUploadBg" class="btn btn-primary btn-sm" disabled>Upload</button>
+                        <button id="btnResetBg" class="btn btn-danger btn-sm">Reset to default</button>
+                    </div>
+                    <span id="bgStatus" class="bg-status"></span>
+                </div>
             </div>
         </div>
 
