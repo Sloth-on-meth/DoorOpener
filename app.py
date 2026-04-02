@@ -1395,7 +1395,8 @@ def admin_background_reset():
     try:
         shutil.copy2(BACKGROUND_DEFAULT_PATH, BACKGROUND_PATH)
     except OSError as e:
-        return jsonify({"error": f"Could not restore default: {e}"}), 500
+        logger.error("Failed to restore default background image", exc_info=True)
+        return jsonify({"error": "Could not restore default background"}), 500
 
     logger.info("Background image reset to default by admin")
     return jsonify({"status": "ok"})
