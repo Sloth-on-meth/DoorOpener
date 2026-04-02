@@ -1318,7 +1318,8 @@ def admin_notice_set():
     try:
         save_config()
     except OSError as e:
-        return jsonify({"error": f"Could not save config: {e}"}), 500
+        logger.error(f"Failed to save config: {e}")
+        return jsonify({"error": "Could not save config"}), 500
     return jsonify({"status": "ok", "notice": notice})
 
 
@@ -1375,7 +1376,8 @@ def admin_background_upload():
             os.unlink(tmp_path)
             raise
     except OSError as e:
-        return jsonify({"error": f"Could not save background: {e}"}), 500
+        logger.error(f"Failed to save background image: {e}")
+        return jsonify({"error": "Could not save background"}), 500
 
     logger.info(f"Background image updated by admin ({len(data)} bytes, type={img_type})")
     return jsonify({"status": "ok"})
@@ -1395,7 +1397,8 @@ def admin_background_reset():
     try:
         shutil.copy2(BACKGROUND_DEFAULT_PATH, BACKGROUND_PATH)
     except OSError as e:
-        return jsonify({"error": f"Could not restore default: {e}"}), 500
+        logger.error(f"Failed to restore default background: {e}")
+        return jsonify({"error": "Could not restore default"}), 500
 
     logger.info("Background image reset to default by admin")
     return jsonify({"status": "ok"})
