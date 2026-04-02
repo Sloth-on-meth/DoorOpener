@@ -673,14 +673,14 @@
             width:100%; height:100%; object-fit:cover; display:block;
             transition:opacity 0.3s;
         }
-        .bg-controls { display:flex; flex-direction:column; gap:10px; justify-content:center; flex:1; }
-        .bg-actions { display:flex; flex-direction:column; gap:8px; align-items:flex-start; }
+        .bg-controls { display:flex; flex-direction:column; gap:10px; justify-content:center; flex:1; min-width:0; }
+        .bg-actions { display:flex; flex-direction:column; gap:8px; align-items:stretch; width:100%; }
         .bg-file-label {
             display:flex; align-items:center; justify-content:center; gap:6px;
             padding:6px 14px; border-radius:8px; font-size:0.82rem; font-weight:600;
             cursor:pointer; background:rgba(255,255,255,0.12);
             border:1px solid rgba(255,255,255,0.22); color:#fff;
-            transition:background 0.2s; text-align:center;
+            transition:background 0.2s; text-align:center; box-sizing:border-box;
         }
         .bg-file-label:hover { background:rgba(255,255,255,0.2); }
         .bg-file-input { display:none; }
