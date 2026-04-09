@@ -6,8 +6,8 @@ A secure Flask web app to open a door via Home Assistant API, with visual keypad
 enhanced multi-layer security, timezone support, and comprehensive brute force protection.
 """
 
+import filetype
 import hmac
-import imghdr
 import json
 import logging
 import os
@@ -167,6 +167,10 @@ if not admin_password:
 # Server Configuration
 server_port = int(os.environ.get("DOOROPENER_PORT", config.getint("server", "port", fallback=6532)))
 test_mode = config.getboolean("server", "test_mode", fallback=False)
+if test_mode:
+    logging.getLogger("dooropener").warning(
+        "TEST MODE ENABLED — the door will NOT open. Disable [server] test_mode in config.ini before deploying to production."
+    )
 
 # OIDC Configuration
 oidc_enabled = config.getboolean("oidc", "enabled", fallback=False)
@@ -264,7 +268,7 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = os.path.join(app.root_path, "static")
 BACKGROUND_PATH = os.path.join(STATIC_DIR, "background.jpg")
 BACKGROUND_DEFAULT_PATH = os.path.join(STATIC_DIR, "background_default.jpg")
-ALLOWED_IMAGE_TYPES = {"jpeg", "png", "gif", "webp"}
+ALLOWED_IMAGE_TYPES = {"jpg", "png", "gif", "webp"}
 MAX_BACKGROUND_SIZE = 10 * 1024 * 1024  # 10 MB
 
 # Preserve the default background on first run so it can be restored later
@@ -329,8 +333,6 @@ def add_security_headers(response):
     # MIME sniffing & legacy XSS
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-
     # Modern browser policies
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = (
@@ -1028,7 +1030,15 @@ def open_door():
 
 @app.route("/admin")
 def admin():
-    return render_template("admin.html", oidc_enabled=bool(oauth), app_version=APP_VERSION, csp_nonce=g.csp_nonce)
+    is_authenticated = bool(session.get("admin_authenticated"))
+    return render_template(
+        "admin.html",
+        oidc_enabled=bool(oauth),
+        app_version=APP_VERSION,
+        csp_nonce=g.csp_nonce,
+        is_authenticated=is_authenticated,
+        test_mode=test_mode,
+    )
 
 
 # --- OIDC (Authentik) Routes ---
@@ -1166,6 +1176,7 @@ def oidc_callback():
             session["admin_authenticated"] = True
             session["admin_login_time"] = get_current_time().isoformat()
             session["admin_user"] = user
+            session["admin_csrf_token"] = secrets.token_hex(32)
 
         # All users are redirected to the home page after login.
         return redirect(url_for("index"))
@@ -1212,11 +1223,39 @@ def admin_auth():
             429,
         )
 
+    # Check if this IP is currently blocked (catches multi-session brute force)
+    if ip_blocked_until.get(primary_ip) and now < ip_blocked_until[primary_ip]:
+        remaining = (ip_blocked_until[primary_ip] - now).total_seconds()
+        attempt_logger.info(
+            json.dumps(
+                {
+                    "timestamp": now.isoformat(),
+                    "ip": primary_ip,
+                    "session": session_id[:8],
+                    "user": "ADMIN",
+                    "status": "ADMIN_IP_BLOCKED",
+                    "details": f"Admin auth IP-blocked for {int(remaining)}s",
+                }
+            )
+        )
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Too many failed attempts. Please try later.",
+                }
+            ),
+            429,
+        )
+
     if hmac.compare_digest(password, admin_password):
-        # Success: clear counters for this session
+        # Success: clear counters for this session and IP
         session_failed_attempts[session_id] = 0
         if session_id in session_blocked_until:
             del session_blocked_until[session_id]
+        ip_failed_attempts[primary_ip] = 0
+        if primary_ip in ip_blocked_until:
+            del ip_blocked_until[primary_ip]
 
         session["admin_authenticated"] = True
         session["admin_login_time"] = now.isoformat()
@@ -1245,13 +1284,17 @@ def admin_auth():
         )
         return jsonify({"status": "success"})
     else:
-        # Failure: increment counters
+        # Failure: increment session and IP counters
         session_failed_attempts[session_id] += 1
+        ip_failed_attempts[primary_ip] += 1
 
         # Block session after SESSION_MAX_ATTEMPTS failures
         if session_failed_attempts[session_id] >= SESSION_MAX_ATTEMPTS:
             session_blocked_until[session_id] = now + BLOCK_TIME
             details = f"Invalid admin password. Session blocked for {int(BLOCK_TIME.total_seconds() // 60)} minutes"
+        elif ip_failed_attempts[primary_ip] >= SESSION_MAX_ATTEMPTS:
+            ip_blocked_until[primary_ip] = now + BLOCK_TIME
+            details = f"Invalid admin password. IP blocked for {int(BLOCK_TIME.total_seconds() // 60)} minutes"
         else:
             details = "Invalid admin password"
 
@@ -1325,7 +1368,9 @@ def admin_notice_set():
 
 @app.route("/admin/background", methods=["GET"])
 def admin_background_get():
-    """Return whether a custom background is currently set."""
+    """Return whether a custom background is currently set. Requires admin auth."""
+    if not _require_admin_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
     has_custom = os.path.exists(BACKGROUND_DEFAULT_PATH) and not _backgrounds_are_identical()
     return jsonify({"custom": has_custom})
 
@@ -1360,10 +1405,11 @@ def admin_background_upload():
     if len(data) > MAX_BACKGROUND_SIZE:
         return jsonify({"error": "File too large (max 10 MB)"}), 413
 
-    # Validate it's actually an image
-    img_type = imghdr.what(None, h=data)
-    if img_type not in ALLOWED_IMAGE_TYPES:
+    # Validate it's actually an image using magic-byte detection
+    kind = filetype.guess(data)
+    if kind is None or kind.extension not in ALLOWED_IMAGE_TYPES:
         return jsonify({"error": "Invalid image type. Allowed: JPEG, PNG, GIF, WebP"}), 415
+    img_type = kind.extension
 
     # Write atomically via temp file
     try:
@@ -1950,8 +1996,14 @@ def health():
 
 
 if __name__ == "__main__":
+    _debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
+    if _debug:
+        logger.warning(
+            "FLASK_DEBUG is enabled — the Werkzeug interactive debugger is active. "
+            "This allows remote code execution via the browser. NEVER enable in production."
+        )
     app.run(
         host="0.0.0.0",  # nosec B104 - intentional; server is designed to listen on all interfaces
         port=server_port,
-        debug=os.environ.get("FLASK_DEBUG", "false").lower() == "true",
+        debug=_debug,
     )

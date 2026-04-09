@@ -719,6 +719,14 @@
         <div id="loginError"></div>
     </div>
 
+    {% if is_authenticated %}
+    {% if test_mode %}
+    <!-- ====== TEST MODE WARNING ====== -->
+    <div id="testModeWarning" class="glass" style="max-width:700px;margin:0 auto 1.5rem;padding:1rem 1.5rem;border:2px solid #ffb300;background:rgba(255,179,0,0.12);text-align:center;">
+        <strong style="color:#ffb300;">&#9888; TEST MODE ENABLED</strong>
+        &mdash; The door will <strong>not</strong> open. Disable <code>[server] test_mode</code> in <code>config.ini</code> before production use.
+    </div>
+    {% endif %}
     <!-- ====== DASHBOARD ====== -->
     <div id="dashboard">
 
@@ -896,6 +904,7 @@
         </div>
 
     </div><!-- /dashboard -->
+    {% endif %}
 </div><!-- /container -->
 
 <div id="toast-container"></div>
@@ -923,22 +932,7 @@
             });
             const data = await res.json();
             if (data.status === 'success') {
-                const check = await fetch('/admin/check-auth', { credentials: 'same-origin', cache: 'no-store' });
-                const checkData = await check.json();
-                if (checkData.authenticated) {
-                    if (checkData.csrf_token) csrfToken = checkData.csrf_token;
-                    await showDashboard();
-                } else {
-                    await new Promise(r => setTimeout(r, 150));
-                    const check2 = await fetch('/admin/check-auth', { credentials: 'same-origin', cache: 'no-store' });
-                    const checkData2 = await check2.json();
-                    if (checkData2.authenticated) {
-                        await showDashboard();
-                    } else {
-                        errorDiv.textContent = 'Login succeeded but session not established. Please try again.';
-                        errorDiv.style.display = 'block';
-                    }
-                }
+                window.location.reload();
             } else {
                 errorDiv.textContent = 'Invalid admin password';
                 errorDiv.style.display = 'block';
@@ -1084,7 +1078,8 @@
 
     function showLogin() {
         document.getElementById('loginForm').style.display = 'block';
-        document.getElementById('dashboard').style.display = 'none';
+        const dash = document.getElementById('dashboard');
+        if (dash) dash.style.display = 'none';
     }
 
     async function checkAuthentication() {
