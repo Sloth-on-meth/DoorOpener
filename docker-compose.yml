@@ -15,7 +15,7 @@ services:
     ports:
       - "${DOOROPENER_PORT:-6532}:${DOOROPENER_PORT:-6532}"
     volumes:
-      - ./config.ini:/app/config.ini:ro
+      - ./config.ini:/app/config.ini:rw
       - ./logs:/app/logs
       - ./users.json:/app/users.json:rw
     restart: unless-stopped
