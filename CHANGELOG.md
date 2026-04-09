@@ -1,3 +1,42 @@
+## v[1.13.0] - 2026-04-09
+
+### 🔐 Security
+- **Fix: CSRF token missing for OIDC admin logins** — admins authenticating via SSO were never issued an `admin_csrf_token`, causing all subsequent CSRF-protected admin endpoints to fail or be bypassable
+- **Dashboard HTML now gated server-side** — the full admin UI (forms, API endpoint names, JS) is only rendered in the HTTP response when the session is authenticated; unauthenticated requests receive the login form only
+- **Fix: unauthenticated `GET /admin/background`** — endpoint now requires admin auth
+- **IP-based rate limiting on `/admin/auth`** — the previous session-only limit (3 attempts) could be bypassed by opening multiple browser sessions; failures now also increment a per-IP counter so multi-session brute force is blocked
+- **Replaced `imghdr` with `filetype`** — `imghdr` was removed from the Python stdlib in 3.13 and is unmaintained; `filetype` uses proper magic-byte detection
+- **Removed obsolete `X-XSS-Protection` header** — superseded by CSP in all modern browsers; the header was a no-op and removed to reduce noise
+- **`test_mode` warnings** — a `WARNING` is now logged at startup and a banner is shown in the admin panel when `test_mode = true` is set, making it harder to accidentally leave enabled in production
+- **`FLASK_DEBUG` warning** — enabling the Werkzeug interactive debugger now logs a prominent warning noting the RCE risk
+
+### ✨ Features
+- **Public notice** — admins can post a short message (e.g. "Door out of service") that appears as a banner above the keypad; managed from the admin panel without a restart
+- **Custom background image** — upload a JPEG/PNG/GIF/WebP background from the admin panel (max 10 MB); the original default is preserved and can be restored at any time
+- **Pushbullet problem reporting** — when a `[pushbullet] api_token` is configured, a report button appears on the keypad; users can send short messages to the admin, rate-limited to 3 per IP per hour
+- **Optional page title** — set `[server] page_title` in `config.ini` to display a building/site name above the keypad
+
+### 🎨 UI/UX
+- Terminal-style "ACCESS GRANTED" animation on successful door open
+- "Access denied" popup with scan line animation and ambient glow
+- Page-bounce body animation when the Easter egg is triggered
+- Toast notifications for door access errors
+- Gear icon navigation button on the admin dashboard
+- GitHub link button in the admin panel footer
+- Admin panel layout refactored for better responsiveness across notice, background, stats, and leaderboard sections
+
+### ⚙️ CI & Infrastructure
+- CodeQL SARIF upload action bumped to v4
+- Removed Sysdig scan workflow
+- Dockerfile base updated to Python 3.12
+
+### 📦 Dependencies
+- `requests` 2.32.5 → 2.33.0
+- `authlib` 1.6.7 → 1.6.9
+- `filetype 1.2.0` added (replaces `imghdr`)
+
+---
+
 ## v[1.11.0] - 2026-03-08
 
 ### 🎨 UI/UX
