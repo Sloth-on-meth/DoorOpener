@@ -6,7 +6,6 @@ A secure Flask web app to open a door via Home Assistant API, with visual keypad
 enhanced multi-layer security, timezone support, and comprehensive brute force protection.
 """
 
-import filetype
 import hmac
 import json
 import logging
@@ -21,6 +20,7 @@ from configparser import ConfigParser
 from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 
+import filetype
 import pytz
 import requests
 from flask import (
@@ -169,7 +169,8 @@ server_port = int(os.environ.get("DOOROPENER_PORT", config.getint("server", "por
 test_mode = config.getboolean("server", "test_mode", fallback=False)
 if test_mode:
     logging.getLogger("dooropener").warning(
-        "TEST MODE ENABLED — the door will NOT open. Disable [server] test_mode in config.ini before deploying to production."
+        "TEST MODE ENABLED — the door will NOT open. "
+        "Disable [server] test_mode in config.ini before deploying to production."
     )
 
 # OIDC Configuration

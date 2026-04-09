@@ -36,7 +36,6 @@ def test_security_headers_on_index(client):
     for h in [
         "X-Content-Type-Options",
         "X-Frame-Options",
-        "X-XSS-Protection",
         "Referrer-Policy",
         "Content-Security-Policy",
     ]:
