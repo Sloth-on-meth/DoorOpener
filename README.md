@@ -8,8 +8,6 @@
 
 **Home Assistant Add-on:** I couldn't figure out how to package this as a proper HA add-on. If you know how, please open a PR. Any solution must keep standalone Docker usage working.
 
-**Security review:** The OIDC implementation is functional but hasn't been independently audited. If you have experience with OIDC/OAuth2 security, feedback and PRs are very welcome.
-
 </details>
 
 ---
@@ -27,16 +25,21 @@ A web-based keypad for controlling smart door locks via Home Assistant. PIN-prot
 - Visual 3×4 keypad with auto-submit on valid PIN length
 - Per-user PINs (4–8 digits), stored in a JSON user store
 - Admin dashboard — user management, audit logs, leaderboard, 24-hour activity chart
-- OIDC/SSO login (Authentik) with optional pinless door open
+- Public notice — admin can post a message displayed above the keypad
+- Custom background image — upload, preview, and reset from the admin panel
+- OIDC/SSO login (Authentik) with PKCE and optional pinless door open
+- Pushbullet notifications — users can report problems directly from the keypad
 - Terminal-style "ACCESS GRANTED" animation on successful open
 - Audio feedback (success chimes, failure sounds) and haptic on mobile
 - Real-time battery monitoring for Zigbee devices (polls every 60 s)
-- Multi-layer rate limiting: per-IP, per-session, and global
+- Multi-layer rate limiting: per-IP, per-session, and global; applies to both PIN and admin auth endpoints
 - Brute-force lockout with visual countdown on the keypad
-- Security headers: CSP with per-request nonces, HSTS-ready, clickjacking prevention
+- Security headers: CSP with per-request nonces, CSRF protection on all admin mutations, clickjacking prevention
+- Dashboard HTML is only rendered server-side when the admin session is authenticated
 - PWA — installable, works offline via service worker
 - Optional page title (e.g. building name) displayed above the keypad
 - Supports `switch`, `lock`, and `input_boolean` HA entities
+- User migration tool — move users from legacy `config.ini [pins]` to the JSON store via the admin UI
 - Test mode for safe development without triggering the actual door
 
 ---
@@ -112,23 +115,30 @@ SESSION_COOKIE_SECURE=true    # set false only for local HTTP dev
 url = http://homeassistant.local:8123
 token = your_long_lived_access_token
 switch_entity = switch.your_door_opener
-# ca_bundle = /etc/dooropener/ha-ca.pem   # custom CA for self-signed HA certs
+# battery_entity = sensor.your_door_battery   # defaults to sensor.<device>_battery
+# ca_bundle = /etc/dooropener/ha-ca.pem       # custom CA for self-signed HA certs
 
 [admin]
 admin_password = change-me
 
 [server]
 port = 6532
-test_mode = false
+test_mode = false              # WARNING: if true, door will NOT open — dev only
 # page_title = Sunset Apartments   # displayed above keypad; omit to hide
-67mode = false                      # enable 6-7 easter egg
+# secret_key = ...             # alternative to FLASK_SECRET_KEY env var
+67mode = false                 # enable 6-7 easter egg
 
 [security]
 max_attempts = 5               # failed attempts per IP before block
 block_time_minutes = 5
 max_global_attempts_per_hour = 50
 session_max_attempts = 3       # failed attempts per session before block
+
+[pushbullet]
+# api_token = your_pushbullet_token   # enables problem-report button on keypad
 ```
+
+> **`test_mode`**: A startup warning is logged and a banner is shown in the admin panel when this is `true`. Never leave it enabled in production — the door will silently succeed without opening.
 
 ### Self-signed Home Assistant certificate
 
@@ -156,14 +166,35 @@ DoorOpener stores users in `users.json`. Manage them through the admin dashboard
 - Create, edit, delete users
 - Activate / deactivate without deletion
 - View creation date, last used, and open count
+- Migrate legacy users from `config.ini [pins]` to the JSON store (individually or all at once)
 - Clear logs (test data or all)
-- 24-hour activity bar chart
+- 24-hour activity bar chart and leaderboard
+
+### Migrating from config.ini pins
+
+If you previously defined users under `[pins]` in `config.ini`, the admin dashboard shows a **Migrate** button next to each legacy user. Migrating moves the user into `users.json` with full metadata tracking and removes them from `config.ini`. Use **Migrate All** to do this in bulk.
+
+---
+
+## Public Notice
+
+The admin panel includes a **Public Notice** field. Whatever you write there is displayed in a banner above the keypad — useful for "Door out of service" messages or access hours. Clear the field to hide the banner.
+
+---
+
+## Background Image
+
+Upload a custom background image (JPEG, PNG, GIF, or WebP, max 10 MB) from the admin panel. The original default background is preserved and can be restored at any time with the **Reset** button.
+
+---
+
+## Pushbullet Notifications
+
+Set `[pushbullet] api_token` in `config.ini` to enable the problem-report button on the keypad. Users can send short messages (max 500 chars) to your Pushbullet account, rate-limited to 3 reports per IP per hour.
 
 ---
 
 ## OIDC / SSO (Authentik)
-
-> This integration works but is a first-pass implementation. It has not been independently audited. Use at your own risk and please open issues/PRs with fixes.
 
 ```ini
 [oidc]
@@ -183,7 +214,7 @@ user_group = dooropener-users
 require_pin_for_oidc = false
 ```
 
-When OIDC is enabled, a **Login with SSO** button appears on the keypad. Authenticated users in `user_group` can open the door without a PIN (unless `require_pin_for_oidc = true`).
+When OIDC is enabled, a **Login with SSO** button appears on the keypad. Authenticated users in `user_group` can open the door without a PIN (unless `require_pin_for_oidc = true`). The OIDC flow uses PKCE (`S256`) and validates state and nonce parameters.
 
 > If running behind a reverse proxy over HTTP for local dev, set `SESSION_COOKIE_SECURE=false` so the browser sends the session cookie.
 
@@ -191,20 +222,34 @@ When OIDC is enabled, a **Login with SSO** button appears on the keypad. Authent
 
 ## API
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/` | Keypad UI |
-| `POST` | `/open-door` | Open the door (JSON body: `{"pin": "1234"}`) |
-| `GET` | `/battery` | Battery level for configured Zigbee device |
-| `GET` | `/auth/status` | Current OIDC auth state |
-| `GET` | `/health` | Health check — returns `{"status": "ok"}` |
-| `GET` | `/admin` | Admin dashboard UI |
-| `POST` | `/admin/auth` | Admin login |
-| `GET` | `/admin/logs` | Audit log entries (JSON) |
-| `GET` | `/admin/users` | User list (JSON) |
-| `POST` | `/admin/users` | Create user |
-| `PUT` | `/admin/users/<name>` | Update user |
-| `DELETE` | `/admin/users/<name>` | Delete user |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/` | — | Keypad UI |
+| `POST` | `/open-door` | — | Open the door (`{"pin": "1234"}`) |
+| `GET` | `/battery` | — | Battery level for configured Zigbee device |
+| `GET` | `/auth/status` | — | Current OIDC auth state |
+| `POST` | `/report-problem` | — | Send a problem report via Pushbullet |
+| `GET` | `/health` | — | Health check — returns `{"status": "ok"}` |
+| `GET` | `/login` | — | Initiate OIDC login flow |
+| `GET` | `/oidc/callback` | — | OIDC redirect callback |
+| `GET` | `/oidc/logout` | — | OIDC logout and session clear |
+| `GET` | `/admin` | — | Admin UI (dashboard HTML only rendered when authenticated) |
+| `POST` | `/admin/auth` | — | Admin password login |
+| `GET` | `/admin/check-auth` | — | Check admin session state |
+| `POST` | `/admin/logout` | Admin | End admin session |
+| `GET` | `/admin/notice` | — | Get current public notice |
+| `POST` | `/admin/notice` | Admin | Set or clear public notice |
+| `GET` | `/admin/background` | Admin | Check if custom background is set |
+| `POST` | `/admin/background` | Admin | Upload background image |
+| `DELETE` | `/admin/background` | Admin | Reset background to default |
+| `GET` | `/admin/logs` | Admin | Audit log entries (JSON) |
+| `POST` | `/admin/logs/clear` | Admin | Clear logs |
+| `GET` | `/admin/users` | Admin | User list (JSON) |
+| `POST` | `/admin/users` | Admin | Create user |
+| `PUT` | `/admin/users/<name>` | Admin | Update user |
+| `DELETE` | `/admin/users/<name>` | Admin | Delete user |
+| `POST` | `/admin/users/<name>/migrate` | Admin | Migrate user from config.ini to JSON store |
+| `POST` | `/admin/users/migrate-all` | Admin | Migrate all config-only users |
 
 ---
 
