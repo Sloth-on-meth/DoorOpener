@@ -847,6 +847,24 @@
             content: '⚠ ';
         }
 
+        /* Test mode banner */
+        #test-mode-banner {
+            width: 100%;
+            box-sizing: border-box;
+            margin-bottom: 1.25rem;
+            padding: 0.75rem 1rem;
+            background: rgba(255, 140, 0, 0.18);
+            border: 1px solid rgba(255, 140, 0, 0.5);
+            border-radius: 12px;
+            backdrop-filter: blur(8px);
+            color: rgba(255, 179, 0, 1);
+            font-size: 0.82rem;
+            font-weight: 600;
+            line-height: 1.5;
+            text-align: center;
+            letter-spacing: 0.02em;
+        }
+
         /* PIN display */
         #pinDisplay {
             width: 300px;
@@ -1232,6 +1250,9 @@
         {% endif %}
         {% if notice %}
         <div id="notice-banner">{{ notice }}</div>
+        {% endif %}
+        {% if test_mode %}
+        <div id="test-mode-banner">&#x1F9EA; TEST MODE &mdash; door will not open</div>
         {% endif %}
         <!-- PIN Display -->
         <div id="pinDisplay">

@@ -594,7 +594,16 @@
         /* ===== CSP-safe utility classes (replaces inline style="...") ===== */
         #loginForm    { display:none; max-width:400px; margin:10vh auto 0; padding:2.5rem; text-align:center; }
         #dashboard    { display:none; }
-        #testModeWarning { max-width:700px; margin:0 auto 1.5rem; padding:1rem 1.5rem; border:2px solid #ffb300; background:rgba(255,179,0,0.12); text-align:center; }
+        #testModeWarning { display:none; max-width:700px; margin:0 auto 1.5rem; padding:1rem 1.5rem; border:2px solid #ffb300; background:rgba(255,179,0,0.12); text-align:center; color:#ffb300; }
+        .test-mode-desc  { font-size:0.82rem; opacity:0.7; margin:0 0 1rem; }
+        .test-mode-row   { display:flex; align-items:center; gap:1rem; }
+        .test-mode-label { font-size:0.9rem; opacity:0.8; }
+        .toggle-wrap   { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0; }
+        .toggle-wrap input { opacity:0; width:0; height:0; }
+        .toggle-slider { position:absolute; inset:0; background:rgba(255,255,255,0.15); border-radius:24px; cursor:pointer; transition:background 0.2s; }
+        .toggle-slider::before { content:''; position:absolute; width:18px; height:18px; left:3px; top:3px; background:#fff; border-radius:50%; transition:transform 0.2s; }
+        .toggle-wrap input:checked + .toggle-slider { background:#ffb300; }
+        .toggle-wrap input:checked + .toggle-slider::before { transform:translateX(20px); }
         #loginError   { color:#ff5252; margin-top:1rem; font-size:0.88rem; display:none; }
         #leaderboardSection { display:none; }
         #usersTab     { display:none; }
@@ -721,13 +730,11 @@
     </div>
 
     {% if is_authenticated %}
-    {% if test_mode %}
     <!-- ====== TEST MODE WARNING ====== -->
     <div id="testModeWarning" class="glass">
-        <strong style="color:#ffb300;">&#9888; TEST MODE ENABLED</strong>
-        &mdash; The door will <strong>not</strong> open. Disable <code>[server] test_mode</code> in <code>config.ini</code> before production use.
+        <strong>&#9888; TEST MODE ENABLED</strong>
+        &mdash; The door will <strong>not</strong> open.
     </div>
-    {% endif %}
     <!-- ====== DASHBOARD ====== -->
     <div id="dashboard">
 
@@ -766,6 +773,19 @@
                         <span id="bgStatus" class="bg-status"></span>
                     </div>
                 </div>
+            </div>
+
+            <div class="glass panel dash-col-bg">
+                <div class="section-title">🧪 Test Mode</div>
+                <p class="test-mode-desc">When enabled the door will <strong>not</strong> open — PIN and OIDC attempts succeed silently.</p>
+                <div class="test-mode-row">
+                    <label class="toggle-wrap">
+                        <input type="checkbox" id="testModeToggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                    <span id="testModeLabel" class="test-mode-label">Off</span>
+                </div>
+                <span id="testModeStatus" class="notice-status"></span>
             </div>
         </div>
 
@@ -948,7 +968,7 @@
         isAuthenticated = true;
         document.getElementById('loginForm').style.display = 'none';
         document.getElementById('dashboard').style.display = 'block';
-        await Promise.all([loadLogs(), loadUsers(), loadNotice()]);
+        await Promise.all([loadLogs(), loadUsers(), loadNotice(), loadTestMode()]);
     }
 
     async function loadNotice() {
@@ -959,6 +979,21 @@
             document.getElementById('noticeText').value = text;
             updateNoticePreview(text);
         } catch (_) {}
+    }
+
+    async function loadTestMode() {
+        try {
+            const res = await fetch('/admin/test-mode', { credentials: 'same-origin', cache: 'no-store' });
+            const data = await res.json();
+            setTestModeUI(data.test_mode);
+        } catch (_) {}
+    }
+
+    function setTestModeUI(enabled) {
+        document.getElementById('testModeToggle').checked = enabled;
+        document.getElementById('testModeLabel').textContent = enabled ? 'ON — door will not open' : 'Off';
+        document.getElementById('testModeLabel').style.color = enabled ? '#ffb300' : '';
+        document.getElementById('testModeWarning').style.display = enabled ? 'block' : 'none';
     }
 
     function updateNoticePreview(text) {
@@ -973,6 +1008,34 @@
     }
 
     if (document.getElementById('dashboard')) {
+
+    document.getElementById('testModeToggle').addEventListener('change', async function() {
+        const enabled = this.checked;
+        const statusEl = document.getElementById('testModeStatus');
+        try {
+            const res = await fetch('/admin/test-mode', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+                body: JSON.stringify({ enabled })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                setTestModeUI(data.test_mode);
+                statusEl.textContent = data.test_mode ? 'Test mode enabled.' : 'Test mode disabled.';
+                statusEl.classList.add('visible');
+                setTimeout(() => statusEl.classList.remove('visible'), 2500);
+            } else {
+                statusEl.textContent = data.error || 'Error saving.';
+                statusEl.classList.add('visible');
+                this.checked = !enabled; // revert
+            }
+        } catch (_) {
+            statusEl.textContent = 'Network error.';
+            statusEl.classList.add('visible');
+            this.checked = !enabled; // revert
+        }
+    });
 
     document.getElementById('noticeText').addEventListener('input', function() {
         updateNoticePreview(this.value);

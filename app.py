@@ -426,6 +426,7 @@ def index():
         csp_nonce=g.csp_nonce,
         page_title=page_title,
         notice=notice,
+        test_mode=test_mode,
         pushbullet_enabled=bool(pushbullet_token),
     )
 
@@ -1365,6 +1366,42 @@ def admin_notice_set():
         logger.error(f"Failed to save config: {e}")
         return jsonify({"error": "Could not save config"}), 500
     return jsonify({"status": "ok", "notice": notice})
+
+
+@app.route("/admin/test-mode", methods=["GET"])
+def admin_test_mode_get():
+    """Return current test_mode state. Requires admin auth."""
+    if not _require_admin_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    return jsonify({"test_mode": test_mode})
+
+
+@app.route("/admin/test-mode", methods=["POST"])
+def admin_test_mode_set():
+    """Enable or disable test_mode. Requires admin auth."""
+    global test_mode
+    if not _require_admin_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+    if not _check_admin_csrf():
+        return jsonify({"error": "Invalid CSRF token"}), 403
+    data = request.get_json(silent=True) or {}
+    if "enabled" not in data:
+        return jsonify({"error": "Missing 'enabled' field"}), 400
+    new_value = bool(data["enabled"])
+    if not config.has_section("server"):
+        config.add_section("server")
+    config.set("server", "test_mode", "true" if new_value else "false")
+    try:
+        save_config()
+    except OSError as e:
+        logger.error(f"Failed to save config: {e}")
+        return jsonify({"error": "Could not save config"}), 500
+    test_mode = new_value
+    if test_mode:
+        logger.warning("TEST MODE ENABLED via admin panel — the door will NOT open.")
+    else:
+        logger.info("Test mode disabled via admin panel.")
+    return jsonify({"status": "ok", "test_mode": test_mode})
 
 
 @app.route("/admin/background", methods=["GET"])
