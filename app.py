@@ -45,7 +45,7 @@ try:
 except Exception:
     OAuth = None
 
-APP_VERSION = "1.13.0"
+APP_VERSION = "1.13.1"
 
 # --- Timezone Setup ---
 # Get timezone from environment variable, default to UTC

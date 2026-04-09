@@ -1,3 +1,18 @@
+## v[1.13.1] - 2026-04-09
+
+### ✨ Features
+- **Test mode toggle in admin panel** — enable/disable test mode live from the admin dashboard without editing `config.ini`; change is persisted to config and takes effect immediately
+- **Test mode banner on keypad page** — when test mode is active a visible amber banner ("🧪 TEST MODE — door will not open") appears above the keypad so users know the door is inactive
+
+### 🐛 Bug Fixes
+- **Admin page JS crash on unauthenticated load** — dashboard event listeners ran unconditionally at page load, throwing `Cannot read properties of null` when the dashboard elements weren't rendered (unauthenticated session); listeners are now guarded behind element existence checks
+- **`docker-compose.yml`: `config.ini` mounted read-only** — the test mode toggle (and any other admin-panel config writes) silently failed because `config.ini` was mounted `:ro`; changed to `:rw`
+
+### 🎨 UI/UX
+- **CSP compliance: removed all inline `style=` attributes from templates** — pin-dot animation delays moved to CSS `nth-child` rules; report modal icon extracted to a CSS class; eliminates a flood of CSP `style-src` violations in the browser console
+
+---
+
 ## v[1.13.0] - 2026-04-09
 
 ### 🔐 Security
