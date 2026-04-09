@@ -4,6 +4,11 @@ config.ini
 #background file
 /static/background.jpg
 
+# Test artifacts
+.coverage
+.coverage.*
+htmlcov/
+
 # Python-related files
 __pycache__/
 *.py[cod]
