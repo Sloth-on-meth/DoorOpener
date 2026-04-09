@@ -594,6 +594,7 @@
         /* ===== CSP-safe utility classes (replaces inline style="...") ===== */
         #loginForm    { display:none; max-width:400px; margin:10vh auto 0; padding:2.5rem; text-align:center; }
         #dashboard    { display:none; }
+        #testModeWarning { max-width:700px; margin:0 auto 1.5rem; padding:1rem 1.5rem; border:2px solid #ffb300; background:rgba(255,179,0,0.12); text-align:center; }
         #loginError   { color:#ff5252; margin-top:1rem; font-size:0.88rem; display:none; }
         #leaderboardSection { display:none; }
         #usersTab     { display:none; }
@@ -722,7 +723,7 @@
     {% if is_authenticated %}
     {% if test_mode %}
     <!-- ====== TEST MODE WARNING ====== -->
-    <div id="testModeWarning" class="glass" style="max-width:700px;margin:0 auto 1.5rem;padding:1rem 1.5rem;border:2px solid #ffb300;background:rgba(255,179,0,0.12);text-align:center;">
+    <div id="testModeWarning" class="glass">
         <strong style="color:#ffb300;">&#9888; TEST MODE ENABLED</strong>
         &mdash; The door will <strong>not</strong> open. Disable <code>[server] test_mode</code> in <code>config.ini</code> before production use.
     </div>

@@ -541,6 +541,14 @@
             transform: translateY(6px) scale(0.7);
             animation: pin-pop 220ms cubic-bezier(.36, .07, .19, .97) forwards;
         }
+        .pin-dot:nth-child(1) { animation-delay:   0ms; }
+        .pin-dot:nth-child(2) { animation-delay:  40ms; }
+        .pin-dot:nth-child(3) { animation-delay:  80ms; }
+        .pin-dot:nth-child(4) { animation-delay: 120ms; }
+        .pin-dot:nth-child(5) { animation-delay: 160ms; }
+        .pin-dot:nth-child(6) { animation-delay: 200ms; }
+        .pin-dot:nth-child(7) { animation-delay: 240ms; }
+        .pin-dot:nth-child(8) { animation-delay: 280ms; }
 
         @keyframes pin-pop {
             0% {
@@ -1067,6 +1075,7 @@
             font-size: 1rem;
             font-weight: 700;
         }
+        .report-icon { color: rgba(220,38,38,0.9); }
         .report-modal p {
             margin: 0 0 1rem;
             font-size: 0.8rem;
@@ -1278,7 +1287,7 @@
     <!-- Report a problem modal -->
     <div class="report-modal-overlay" id="reportModalOverlay">
         <div class="report-modal">
-            <h3><span style="color:rgba(220,38,38,0.9)">!</span> Report a Problem</h3>
+            <h3><span class="report-icon">!</span> Report a Problem</h3>
             <p>Describe the issue and it will be sent to the admin.</p>
             <textarea id="reportMessage" placeholder="e.g. Door doesn't respond, keypad not working…" maxlength="500" autocomplete="off"></textarea>
             <div class="report-modal-msg" id="reportMsg"></div>
@@ -1389,7 +1398,7 @@
             } else {
                 let html = '';
                 for (let i = 0; i < currentPin.length; i++) {
-                    html += `<span class="pin-dot" style="animation-delay:${i * 40}ms">●</span>`;
+                    html += '<span class="pin-dot">●</span>';
                 }
                 display.innerHTML = html;
             }
