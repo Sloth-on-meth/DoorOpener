@@ -1,6 +1,6 @@
 [![CI](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/ci.yml)
 [![Docker Build](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/docker-build.yml/badge.svg?branch=main)](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/docker-build.yml)
-![Version 1.13](https://img.shields.io/badge/version-1.13.0-blue?style=flat-square)
+![Version 1.13](https://img.shields.io/badge/version-1.13.1-blue?style=flat-square)
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Q5Q81T7CVO)
 
 <details>
