@@ -1114,37 +1114,41 @@
     document.addEventListener('DOMContentLoaded', () => {
         checkAuthentication();
 
-        // Auth
+        // Auth — login form is always present
         document.getElementById('loginBtn').addEventListener('click', login);
         document.getElementById('adminPassword').addEventListener('keypress', e => { if (e.key === 'Enter') login(); });
-        document.getElementById('logoutBtn').addEventListener('click', logout);
 
-        // Tabs
-        document.getElementById('tabLogsBtn').addEventListener('click', () => switchTab('logs'));
-        document.getElementById('tabUsersBtn').addEventListener('click', () => switchTab('users'));
-        document.getElementById('tabActivityBtn').addEventListener('click', () => switchTab('activity'));
+        // Dashboard elements are only rendered when authenticated
+        if (document.getElementById('dashboard')) {
+            document.getElementById('logoutBtn').addEventListener('click', logout);
 
-        // Log controls
-        document.getElementById('sortBy').addEventListener('change', sortLogs);
-        document.getElementById('filterUser').addEventListener('change', filterLogs);
-        document.getElementById('filterStatus').addEventListener('change', filterLogs);
-        document.getElementById('btnRefreshLogs').addEventListener('click', loadLogs);
-        document.getElementById('btnClearAll').addEventListener('click', () => openClearAll('btnClearAll'));
+            // Tabs
+            document.getElementById('tabLogsBtn').addEventListener('click', () => switchTab('logs'));
+            document.getElementById('tabUsersBtn').addEventListener('click', () => switchTab('users'));
+            document.getElementById('tabActivityBtn').addEventListener('click', () => switchTab('activity'));
 
-        // User controls
-        document.getElementById('btnMigrateAll').addEventListener('click', () => openMigrateAll('btnMigrateAll'));
-        document.getElementById('btnAddUser').addEventListener('click', openAddUser);
+            // Log controls
+            document.getElementById('sortBy').addEventListener('change', sortLogs);
+            document.getElementById('filterUser').addEventListener('change', filterLogs);
+            document.getElementById('filterStatus').addEventListener('change', filterLogs);
+            document.getElementById('btnRefreshLogs').addEventListener('click', loadLogs);
+            document.getElementById('btnClearAll').addEventListener('click', () => openClearAll('btnClearAll'));
 
-        // Event delegation for dynamically rendered user action buttons
-        document.getElementById('dashboard').addEventListener('click', e => {
-            const btn = e.target.closest('[data-action]');
-            if (!btn) return;
-            const action = btn.dataset.action;
-            const username = btn.dataset.username;
-            if (action === 'edit') openEditUser(username);
-            else if (action === 'toggle') toggleActive(username, btn.dataset.active === 'true');
-            else if (action === 'delete') deleteUser(username);
-        });
+            // User controls
+            document.getElementById('btnMigrateAll').addEventListener('click', () => openMigrateAll('btnMigrateAll'));
+            document.getElementById('btnAddUser').addEventListener('click', openAddUser);
+
+            // Event delegation for dynamically rendered user action buttons
+            document.getElementById('dashboard').addEventListener('click', e => {
+                const btn = e.target.closest('[data-action]');
+                if (!btn) return;
+                const action = btn.dataset.action;
+                const username = btn.dataset.username;
+                if (action === 'edit') openEditUser(username);
+                else if (action === 'toggle') toggleActive(username, btn.dataset.active === 'true');
+                else if (action === 'delete') deleteUser(username);
+            });
+        }
 
         checkForUpdate("{{ app_version }}");
     });
