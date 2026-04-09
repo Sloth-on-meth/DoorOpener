@@ -971,6 +971,8 @@
         }
     }
 
+    if (document.getElementById('dashboard')) {
+
     document.getElementById('noticeText').addEventListener('input', function() {
         updateNoticePreview(this.value);
     });
@@ -1075,6 +1077,8 @@
             showBgStatus('Network error.', true);
         }
     });
+
+    } // end dashboard guard
 
     function showLogin() {
         document.getElementById('loginForm').style.display = 'block';
