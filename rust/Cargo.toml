@@ -16,7 +16,7 @@ axum-extra = { version = "0.10", features = ["typed-header"] }
 tokio = { version = "1", features = ["full"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["fs", "trace"] }
-tower-sessions = { version = "0.13", features = ["memory-store", "axum-core"] }
+tower-sessions = { version = "0.15", features = ["memory-store"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Disable default native-tls; use rustls only to avoid openssl-sys dep

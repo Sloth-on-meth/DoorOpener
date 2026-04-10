@@ -78,7 +78,7 @@ pub async fn open_door(
     // --- In-memory session + IP blocks ---
     {
         let rl = state.inner.rate_limit.read().await;
-        if let Some(_until) = rl.is_session_blocked(&session_id) {
+        if let Some(until) = rl.is_session_blocked(&session_id) {
             return (
                 StatusCode::TOO_MANY_REQUESTS,
                 Json(json!({
