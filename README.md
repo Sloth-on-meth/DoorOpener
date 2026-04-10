@@ -1,3 +1,5 @@
+> **This branch (`rust-rewrite`) is an experimental Rust port I did for fun. It is incomplete, untested in production, and may have bugs or missing features. Do not use it to control your actual door. Use the [main branch](https://github.com/Sloth-on-meth/DoorOpener/tree/main) for anything real.**
+
 [![CI](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/ci.yml)
 [![Docker Build](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/docker-build.yml/badge.svg?branch=main)](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/docker-build.yml)
 ![Version 1.13](https://img.shields.io/badge/version-1.13.1-blue?style=flat-square)
