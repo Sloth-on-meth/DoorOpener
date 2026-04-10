@@ -1,4 +1,10 @@
-> **This branch (`rust-rewrite`) is an experimental Rust port I did for fun. It is incomplete, untested in production, and may have bugs or missing features. Do not use it to control your actual door. Use the [main branch](https://github.com/Sloth-on-meth/DoorOpener/tree/main) for anything real.**
+# ⚠️ DO NOT USE THIS IN PRODUCTION ⚠️
+
+**This branch (`rust-rewrite`) is a Rust port I wrote for fun. It is experimental, incomplete, and has not been tested in any real environment. Do not use it to control your actual door — it may fail silently, have security issues, or break at any time.**
+
+**For anything real, use the [main branch](https://github.com/Sloth-on-meth/DoorOpener/tree/main).**
+
+---
 
 [![CI](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/ci.yml)
 [![Docker Build](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/docker-build.yml/badge.svg?branch=main)](https://github.com/Sloth-on-meth/DoorOpener/actions/workflows/docker-build.yml)
