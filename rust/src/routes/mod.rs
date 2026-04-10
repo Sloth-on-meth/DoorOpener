@@ -53,10 +53,10 @@ pub fn build_router(state: AppState, static_dir: std::path::PathBuf) -> Router {
             get(admin::admin_users_list).post(admin::admin_users_create),
         )
         .route(
-            "/admin/users/:username",
+            "/admin/users/{username}",
             put(admin::admin_users_update).delete(admin::admin_users_delete),
         )
-        .route("/admin/users/:username/migrate", post(admin::admin_users_migrate))
+        .route("/admin/users/{username}/migrate", post(admin::admin_users_migrate))
         .route("/admin/users/migrate-all", post(admin::admin_users_migrate_all))
         // Problem report
         .route("/report-problem", post(index::report_problem))
