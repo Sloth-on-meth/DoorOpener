@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use state::AppState;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use tower_sessions::{MemoryStore, SessionManagerLayer};
+use tower_sessions::{Expiry, MemoryStore, SessionManagerLayer};
 use tower_sessions::cookie::SameSite;
 use time::Duration;
 
@@ -36,7 +36,6 @@ async fn main() -> Result<()> {
         .with_context(|| format!("Failed to load config from {:?}", config_path))?;
 
     let port = cfg.port;
-    let secret_key = cfg.secret_key.clone();
     let session_cookie_secure = cfg.session_cookie_secure;
     let static_dir = cfg.static_dir.clone();
 
@@ -70,7 +69,7 @@ async fn main() -> Result<()> {
         .with_secure(session_cookie_secure)
         .with_same_site(SameSite::Lax)
         .with_http_only(true)
-        .with_max_age(Duration::days(30));
+        .with_expiry(Expiry::OnInactivity(Duration::days(30)));
 
     // --- Router ---
     let app = routes::build_router(state, static_dir)

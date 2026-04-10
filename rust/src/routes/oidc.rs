@@ -287,7 +287,7 @@ pub async fn oidc_callback(
     };
 
     // Group access control
-    let (is_admin, is_user_allowed) = if !cfg.oidc_admin_group.is_empty() || !cfg.oidc_user_group.is_empty() {
+    let (is_admin, _is_user_allowed) = if !cfg.oidc_admin_group.is_empty() || !cfg.oidc_user_group.is_empty() {
         if groups.is_empty() {
             tracing::error!("No groups found in OIDC token for user {}", user);
             return (StatusCode::FORBIDDEN, "Access denied: No groups found").into_response();

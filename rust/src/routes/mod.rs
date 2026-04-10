@@ -6,7 +6,7 @@ pub mod oidc;
 use crate::state::AppState;
 use axum::{
     Router,
-    routing::{delete, get, post, put},
+    routing::{get, post, put},
 };
 use tower_http::services::ServeDir;
 

@@ -1,6 +1,5 @@
 use crate::config::save as save_config;
 use crate::logging::{AuditEntry, filter_test_entries, parse_log_file};
-use crate::rate_limit::latest_block_ts;
 use crate::routes::index::{gen_nonce, html_response_with_security_headers};
 use crate::state::AppState;
 use axum::{
@@ -75,15 +74,14 @@ pub async fn admin_auth(
     // Check if blocked
     {
         let rl = state.inner.rate_limit.read().await;
-        if let Some(until) = rl.is_session_blocked(&session_id) {
-            let remaining = (until - chrono::Utc::now()).num_seconds();
+        if let Some(_until) = rl.is_session_blocked(&session_id) {
             return (
                 StatusCode::TOO_MANY_REQUESTS,
                 Json(json!({ "status": "error", "message": "Too many failed attempts. Please try later." })),
             )
                 .into_response();
         }
-        if let Some(until) = rl.is_ip_blocked(&identifier) {
+        if let Some(_until) = rl.is_ip_blocked(&identifier) {
             return (
                 StatusCode::TOO_MANY_REQUESTS,
                 Json(json!({ "status": "error", "message": "Too many failed attempts. Please try later." })),
@@ -178,7 +176,7 @@ pub async fn admin_check_auth(session: Session) -> impl IntoResponse {
 // ---------------------------------------------------------------------------
 
 pub async fn admin_logout(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     session: Session,
     headers: HeaderMap,
 ) -> impl IntoResponse {

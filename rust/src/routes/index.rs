@@ -1,5 +1,4 @@
 use crate::ha_client;
-use crate::logging::AuditEntry;
 use crate::state::AppState;
 use axum::{
     Json,

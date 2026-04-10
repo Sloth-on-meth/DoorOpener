@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use configparser::ini::Ini;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

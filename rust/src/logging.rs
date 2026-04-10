@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;

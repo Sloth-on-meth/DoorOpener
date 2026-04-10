@@ -78,8 +78,7 @@ pub async fn open_door(
     // --- In-memory session + IP blocks ---
     {
         let rl = state.inner.rate_limit.read().await;
-        if let Some(until) = rl.is_session_blocked(&session_id) {
-            let remaining = (until - chrono::Utc::now()).num_seconds();
+        if let Some(_until) = rl.is_session_blocked(&session_id) {
             return (
                 StatusCode::TOO_MANY_REQUESTS,
                 Json(json!({
@@ -316,8 +315,8 @@ async fn execute_door_open(
     primary_ip: &str,
     session_id: &str,
     matched_user: &str,
-    identifier: &str,
-    session: &Session,
+    _identifier: &str,
+    _session: &Session,
 ) -> axum::response::Response {
     let cfg = &state.inner.cfg;
     let display_name = {
