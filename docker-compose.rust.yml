@@ -1,0 +1,30 @@
+services:
+  dooropener-rust:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust
+    container_name: dooropener-rust
+    restart: unless-stopped
+    ports:
+      - "6532:6532"
+    volumes:
+      - ./config.ini:/app/config.ini:rw
+      - ./users.json:/app/users.json:rw
+      - ./logs:/app/logs:rw
+      - ./static/background.jpg:/app/static/background.jpg:rw
+    environment:
+      - TZ=UTC
+      # Override any of these to customise at runtime:
+      # - DOOROPENER_PORT=6532
+      # - DOOROPENER_CONFIG=/app/config.ini
+      # - DOOROPENER_LOG_DIR=/app/logs
+      # - USERS_STORE_PATH=/app/users.json
+      # - SECRET_KEY=your-secret-here
+      # - SESSION_COOKIE_SECURE=true
+      # - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:6532/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s

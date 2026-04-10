@@ -1,0 +1,39 @@
+[package]
+name = "dooropener"
+version = "1.13.1"
+edition = "2021"
+# Requires Rust 1.86+ (icu_normalizer/time transitive deps).
+# The Dockerfile uses rust:1.87-slim. For local dev: `rustup update`.
+rust-version = "1.86"
+
+[[bin]]
+name = "dooropener"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", features = ["multipart", "macros"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs", "trace"] }
+tower-sessions = { version = "0.9", features = ["memory-store"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Disable default native-tls; use rustls only to avoid openssl-sys dep
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart", "charset", "http2"] }
+tera = "1"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.9"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+rand = "0.9"
+uuid = { version = "1", features = ["v4"] }
+infer = "0.19"
+anyhow = "1"
+thiserror = "2"
+configparser = "3"
+base64 = "0.22"
+sha2 = "0.10"
+hex = "0.4"
+time = { version = "0.3", features = ["serde"] }

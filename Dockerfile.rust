@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1
+# ─── Builder stage ────────────────────────────────────────────────────────────
+FROM rust:1.87-slim AS builder
+
+WORKDIR /build
+
+# Cache dependency compilation separately from app source
+COPY rust/Cargo.toml rust/Cargo.lock* ./
+RUN mkdir -p src && echo 'fn main() {}' > src/main.rs
+RUN cargo build --release 2>/dev/null || true
+
+# Now copy real source and build
+COPY rust/src ./src
+RUN touch src/main.rs && cargo build --release
+
+# ─── Runtime stage ────────────────────────────────────────────────────────────
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /build/target/release/dooropener /app/dooropener
+
+# Copy templates and static assets from the Python project root
+COPY templates/ /app/templates/
+COPY static/ /app/static/
+
+# Entrypoint: the binary reads config.ini from /app/config.ini by default
+ENTRYPOINT ["/app/dooropener"]

@@ -52,3 +52,6 @@ logs/
 users.json
 memory.md
 .claude/
+
+# Rust build artifacts
+rust/target/
