@@ -5,6 +5,6 @@ Werkzeug == 3.1.6
 pytz == 2025.2
 pytest == 9.0.3
 pytest-cov == 6.1.0
-Authlib == 1.6.9
+Authlib == 1.6.11
 bandit == 1.8.3
 gunicorn == 23.0.0
