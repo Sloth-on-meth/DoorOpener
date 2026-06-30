@@ -74,20 +74,26 @@ except Exception as e:
     logging.getLogger("dooropener").error(f"Could not create log directory: {e}")
 log_path = os.path.join(log_dir, "log.txt")
 
-# Dedicated logger for door attempts (audit trail)
-attempt_logger = logging.getLogger("door_attempts")
-attempt_logger.setLevel(logging.INFO)
-file_handler = RotatingFileHandler(log_path, maxBytes=1_000_000, backupCount=5)
-file_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
-attempt_logger.handlers = [file_handler]
+# Configure the root logger once: console + rotating operational log.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        RotatingFileHandler(os.path.join(log_dir, "door_access.log"), maxBytes=1_000_000, backupCount=3),
+    ],
+)
 
-# Add a logger for general errors if not already present
+# General-purpose application logger (propagates to the root handlers above).
 logger = logging.getLogger("dooropener")
 logger.setLevel(logging.INFO)
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-    logger.addHandler(handler)
+
+# Dedicated logger for door attempts (machine-readable audit trail in log.txt).
+attempt_logger = logging.getLogger("door_attempts")
+attempt_logger.setLevel(logging.INFO)
+_attempt_handler = RotatingFileHandler(log_path, maxBytes=1_000_000, backupCount=5)
+_attempt_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
+attempt_logger.handlers = [_attempt_handler]
 
 # --- Flask App Setup ---
 app = Flask(__name__)
@@ -240,6 +246,13 @@ session_blocked_until = defaultdict(lambda: None)
 global_failed_attempts = 0
 global_last_reset = get_current_time()
 
+# Per-client last-seen times (monotonic seconds) so idle rate-limit state can be
+# evicted. Without this, the dicts above grow unbounded as distinct IPs/sessions
+# accumulate keys that are never removed — a slow memory-exhaustion vector.
+_rate_limit_last_seen: dict[str, float] = {}
+_last_cleanup_mono = time.monotonic()
+RATE_LIMIT_CLEANUP_INTERVAL = 300  # seconds between sweeps
+
 # Pushbullet configuration
 pushbullet_token = config.get("pushbullet", "api_token", fallback="").strip()
 
@@ -253,17 +266,6 @@ MAX_ATTEMPTS = config.getint("security", "max_attempts", fallback=5)
 BLOCK_TIME = timedelta(minutes=config.getint("security", "block_time_minutes", fallback=5))
 MAX_GLOBAL_ATTEMPTS_PER_HOUR = config.getint("security", "max_global_attempts_per_hour", fallback=50)
 SESSION_MAX_ATTEMPTS = config.getint("security", "session_max_attempts", fallback=3)
-
-# Configure main logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        RotatingFileHandler(os.path.join(log_dir, "door_access.log"), maxBytes=1_000_000, backupCount=3),
-    ],
-)
-logger = logging.getLogger(__name__)
 
 # --- Background image paths ---
 STATIC_DIR = os.path.join(app.root_path, "static")
@@ -324,7 +326,53 @@ def get_client_identifier():
     # Create composite identifier (harder to spoof than just IP)
     identifier = f"{primary_ip}:{hash(user_agent + accept_lang) % 10000}"
 
+    # Record activity so idle rate-limit state for these keys can be evicted later.
+    now_mono = time.monotonic()
+    for key in (primary_ip, session_id, identifier):
+        if key:
+            _rate_limit_last_seen[key] = now_mono
+
     return primary_ip, session_id, identifier
+
+
+def _cleanup_rate_limit_state():
+    """Evict idle per-client rate-limit entries to bound memory use.
+
+    Throttled to run at most once per RATE_LIMIT_CLEANUP_INTERVAL. Keys idle longer
+    than the longest meaningful window (block time and the global hourly window) are
+    safe to drop: by then any block has expired and the global counter has reset.
+    """
+    global _last_cleanup_mono
+    now_mono = time.monotonic()
+    if now_mono - _last_cleanup_mono < RATE_LIMIT_CLEANUP_INTERVAL:
+        return
+    _last_cleanup_mono = now_mono
+
+    now = get_current_time()
+    ttl_seconds = max(BLOCK_TIME.total_seconds(), 3600) + 600
+    cutoff = now_mono - ttl_seconds
+
+    stale_keys = [k for k, seen in _rate_limit_last_seen.items() if seen < cutoff]
+    for k in stale_keys:
+        _rate_limit_last_seen.pop(k, None)
+        ip_failed_attempts.pop(k, None)
+        session_failed_attempts.pop(k, None)
+        ip_blocked_until.pop(k, None)
+        session_blocked_until.pop(k, None)
+
+    # Always drop already-expired block timestamps, even for recently-seen keys.
+    for blocked in (ip_blocked_until, session_blocked_until):
+        for k in [k for k, v in blocked.items() if v is not None and v < now]:
+            del blocked[k]
+
+    # Prune the problem-report sliding window.
+    report_cutoff = now - REPORT_WINDOW
+    for ip in list(_report_timestamps.keys()):
+        recent = [t for t in _report_timestamps[ip] if t > report_cutoff]
+        if recent:
+            _report_timestamps[ip] = recent
+        else:
+            del _report_timestamps[ip]
 
 
 def add_security_headers(response):
@@ -405,6 +453,8 @@ def validate_pin_input(pin):
 @app.before_request
 def set_csp_nonce():
     g.csp_nonce = secrets.token_hex(16)
+    # Opportunistic, self-throttled sweep of idle rate-limit state.
+    _cleanup_rate_limit_state()
 
 
 @app.after_request
@@ -468,6 +518,128 @@ def battery():
         return jsonify({"level": None})
 
 
+def log_attempt(status, details, *, user="UNKNOWN", primary_ip=None, session_id=None, now=None, extra=None):
+    """Write a single structured entry to the door-attempt audit log (log.txt)."""
+    entry = {
+        "timestamp": (now or get_current_time()).isoformat(),
+        "ip": primary_ip if primary_ip is not None else request.remote_addr,
+        "session": session_id[:8] if session_id else "unknown",
+        "user": user,
+        "status": status,
+        "details": details,
+    }
+    if extra:
+        entry.update(extra)
+    attempt_logger.info(json.dumps(entry))
+
+
+def _ha_service_url():
+    """Return the Home Assistant service URL appropriate for the configured entity."""
+    if entity_id.startswith("lock."):
+        return f"{ha_url}/api/services/lock/unlock"
+    if entity_id.startswith("input_boolean."):
+        return f"{ha_url}/api/services/input_boolean/turn_on"
+    return f"{ha_url}/api/services/switch/turn_on"
+
+
+def _enforce_active_block(session_id, identifier, now, primary_ip, user):
+    """If the session or IP is currently blocked, log it and return a (response, 429)
+    tuple; otherwise return None. Shared by the PIN and OIDC success paths."""
+    sess_blocked = session_blocked_until[session_id] and now < session_blocked_until[session_id]
+    ip_blocked = ip_blocked_until[identifier] and now < ip_blocked_until[identifier]
+    if not (sess_blocked or ip_blocked):
+        return None
+
+    remaining = 0
+    blocked_until_ts = None
+    if sess_blocked:
+        remaining = max(remaining, int((session_blocked_until[session_id] - now).total_seconds()))
+        blocked_until_ts = session_blocked_until[session_id].timestamp()
+    if ip_blocked:
+        remaining = max(remaining, int((ip_blocked_until[identifier] - now).total_seconds()))
+        ts = ip_blocked_until[identifier].timestamp()
+        blocked_until_ts = max(blocked_until_ts or ts, ts)
+
+    log_attempt(
+        "BLOCK_ENFORCED",
+        f"Access blocked for {remaining} more seconds",
+        user=user,
+        primary_ip=primary_ip,
+        session_id=session_id,
+        now=now,
+    )
+    return (
+        jsonify(
+            {
+                "status": "error",
+                "message": "Too many failed attempts. Please try again later.",
+                "blocked_until": blocked_until_ts,
+            }
+        ),
+        429,
+    )
+
+
+def _send_open_command(matched_user, primary_ip, session_id, now, *, via_oidc=False):
+    """Open the door via Home Assistant (or simulate in test mode), log the result and
+    return a Flask JSON response. Shared by the PIN and OIDC pinless success paths."""
+    suffix = " via OIDC" if via_oidc else ""
+    display_name = matched_user.capitalize() if isinstance(matched_user, str) else "User"
+
+    def _record_success(test):
+        detail = f"Door opened (TEST MODE){suffix}" if test else f"Door opened{suffix}"
+        log_attempt("SUCCESS", detail, user=matched_user, primary_ip=primary_ip, session_id=session_id, now=now)
+        try:
+            users_store.touch_user(matched_user)
+        except Exception:
+            logger.exception("Error updating touch_user for door open")
+
+    if test_mode:
+        _record_success(test=True)
+        return jsonify(
+            {
+                "status": "success",
+                "message": f"Door open command sent (TEST MODE).\nWelcome home, {display_name}!",
+            }
+        )
+
+    try:
+        response = requests.post(
+            _ha_service_url(),
+            headers=ha_headers,
+            json={"entity_id": entity_id},
+            timeout=10,
+            verify=(ha_ca_bundle or True),
+        )
+        response.raise_for_status()
+        if response.status_code == 200:
+            _record_success(test=False)
+            return jsonify(
+                {
+                    "status": "success",
+                    "message": f"Door open command sent.\nWelcome home, {display_name}!",
+                }
+            )
+        reason = f"Home Assistant API error: {response.status_code}"
+        log_attempt("FAILURE", reason, user=matched_user, primary_ip=primary_ip, session_id=session_id, now=now)
+        return jsonify({"status": "error", "message": reason}), 500
+    except requests.RequestException as e:
+        logger.error(f"Error communicating with Home Assistant: {e}")
+        return jsonify({"status": "error", "message": "Failed to contact Home Assistant"}), 502
+    except Exception as e:
+        reason = "Internal server error during API call"
+        log_attempt(
+            "API_FAILURE",
+            reason,
+            user=matched_user,
+            primary_ip=primary_ip,
+            session_id=session_id,
+            now=now,
+            extra={"exception": str(e), "traceback": traceback.format_exc()},
+        )
+        return jsonify({"status": "error", "message": reason}), 500
+
+
 @app.route("/open-door", methods=["POST"])
 def open_door():
     try:
@@ -477,30 +649,16 @@ def open_door():
 
         # Check for suspicious requests first
         if is_request_suspicious():
-            reason = "Suspicious request detected"
-            log_entry = {
-                "timestamp": now.isoformat(),
-                "ip": primary_ip,
-                "session": session_id[:8],
-                "user": "UNKNOWN",
-                "status": "SUSPICIOUS",
-                "details": reason,
-            }
-            attempt_logger.info(json.dumps(log_entry))
+            log_attempt(
+                "SUSPICIOUS", "Suspicious request detected", primary_ip=primary_ip, session_id=session_id, now=now
+            )
             return jsonify({"status": "error", "message": "Request blocked"}), 403
 
         # Check global rate limit
         if not check_global_rate_limit():
-            reason = "Global rate limit exceeded"
-            log_entry = {
-                "timestamp": now.isoformat(),
-                "ip": primary_ip,
-                "session": session_id[:8],
-                "user": "UNKNOWN",
-                "status": "GLOBAL_BLOCKED",
-                "details": reason,
-            }
-            attempt_logger.info(json.dumps(log_entry))
+            log_attempt(
+                "GLOBAL_BLOCKED", "Global rate limit exceeded", primary_ip=primary_ip, session_id=session_id, now=now
+            )
             return (
                 jsonify({"status": "error", "message": "Service temporarily unavailable"}),
                 429,
@@ -510,16 +668,13 @@ def open_door():
         sess_block_ts = session.get("blocked_until_ts")
         if sess_block_ts and time.time() < float(sess_block_ts):
             remaining = int(float(sess_block_ts) - time.time())
-            reason = f"Session blocked for {remaining} more seconds (persisted)"
-            log_entry = {
-                "timestamp": now.isoformat(),
-                "ip": primary_ip,
-                "session": session_id[:8],
-                "user": "UNKNOWN",
-                "status": "SESSION_BLOCKED",
-                "details": reason,
-            }
-            attempt_logger.info(json.dumps(log_entry))
+            log_attempt(
+                "SESSION_BLOCKED",
+                f"Session blocked for {remaining} more seconds (persisted)",
+                primary_ip=primary_ip,
+                session_id=session_id,
+                now=now,
+            )
             return (
                 jsonify(
                     {
@@ -534,16 +689,13 @@ def open_door():
         # Check in-memory session-based blocking (fallback when running single-worker)
         if session_blocked_until[session_id] and now < session_blocked_until[session_id]:
             remaining = (session_blocked_until[session_id] - now).total_seconds()
-            reason = f"Session blocked for {int(remaining)} more seconds"
-            log_entry = {
-                "timestamp": now.isoformat(),
-                "ip": primary_ip,
-                "session": session_id[:8],
-                "user": "UNKNOWN",
-                "status": "SESSION_BLOCKED",
-                "details": reason,
-            }
-            attempt_logger.info(json.dumps(log_entry))
+            log_attempt(
+                "SESSION_BLOCKED",
+                f"Session blocked for {int(remaining)} more seconds",
+                primary_ip=primary_ip,
+                session_id=session_id,
+                now=now,
+            )
             return (
                 jsonify(
                     {
@@ -558,16 +710,13 @@ def open_door():
         # Check IP-based blocking (fallback)
         if ip_blocked_until[identifier] and now < ip_blocked_until[identifier]:
             remaining = (ip_blocked_until[identifier] - now).total_seconds()
-            reason = f"IP blocked for {int(remaining)} more seconds"
-            log_entry = {
-                "timestamp": now.isoformat(),
-                "ip": primary_ip,
-                "session": session_id[:8],
-                "user": "UNKNOWN",
-                "status": "IP_BLOCKED",
-                "details": reason,
-            }
-            attempt_logger.info(json.dumps(log_entry))
+            log_attempt(
+                "IP_BLOCKED",
+                f"IP blocked for {int(remaining)} more seconds",
+                primary_ip=primary_ip,
+                session_id=session_id,
+                now=now,
+            )
             return (
                 jsonify(
                     {
@@ -610,155 +759,20 @@ def open_door():
         # If no PIN provided but OIDC user is authenticated and allowed, proceed without PIN
         if (not pin_from_request) and oidc_auth and oidc_user_allowed and not require_pin_for_oidc:
             # Re-check block state right before granting access
-            if (session_blocked_until[session_id] and now < session_blocked_until[session_id]) or (
-                ip_blocked_until[identifier] and now < ip_blocked_until[identifier]
-            ):
-                remaining = 0
-                if session_blocked_until[session_id] and now < session_blocked_until[session_id]:
-                    remaining = max(
-                        remaining,
-                        int((session_blocked_until[session_id] - now).total_seconds()),
-                    )
-                if ip_blocked_until[identifier] and now < ip_blocked_until[identifier]:
-                    remaining = max(
-                        remaining,
-                        int((ip_blocked_until[identifier] - now).total_seconds()),
-                    )
-                reason = f"Access blocked for {remaining} more seconds"
-                log_entry = {
-                    "timestamp": now.isoformat(),
-                    "ip": primary_ip,
-                    "session": session_id[:8],
-                    "user": oidc_user or "UNKNOWN",
-                    "status": "BLOCK_ENFORCED",
-                    "details": reason,
-                }
-                attempt_logger.info(json.dumps(log_entry))
-                # Determine latest block end
-                blocked_until_ts = None
-                if session_blocked_until[session_id] and now < session_blocked_until[session_id]:
-                    blocked_until_ts = session_blocked_until[session_id].timestamp()
-                if ip_blocked_until[identifier] and now < ip_blocked_until[identifier]:
-                    ts = ip_blocked_until[identifier].timestamp()
-                    blocked_until_ts = max(blocked_until_ts or ts, ts)
-                return (
-                    jsonify(
-                        {
-                            "status": "error",
-                            "message": "Too many failed attempts. Please try again later.",
-                            "blocked_until": blocked_until_ts,
-                        }
-                    ),
-                    429,
-                )
+            blocked = _enforce_active_block(session_id, identifier, now, primary_ip, oidc_user or "UNKNOWN")
+            if blocked is not None:
+                return blocked
 
             matched_user = oidc_user or "oidc-user"
-            # Reset failed attempts upon authorized OIDC use only if not currently blocked
-            if not (session_blocked_until[session_id] and now < session_blocked_until[session_id]) and not (
-                ip_blocked_until[identifier] and now < ip_blocked_until[identifier]
-            ):
-                ip_failed_attempts[identifier] = 0
-                session_failed_attempts[session_id] = 0
-                if identifier in ip_blocked_until:
-                    del ip_blocked_until[identifier]
-                if session_id in session_blocked_until:
-                    del session_blocked_until[session_id]
+            # Reset failed attempts upon authorized OIDC use (no active block reached here)
+            ip_failed_attempts[identifier] = 0
+            session_failed_attempts[session_id] = 0
+            if identifier in ip_blocked_until:
+                del ip_blocked_until[identifier]
+            if session_id in session_blocked_until:
+                del session_blocked_until[session_id]
 
-            # Test or production flow mirrors the successful PIN path
-            if test_mode:
-                reason = "Door opened (TEST MODE) via OIDC"
-                log_entry = {
-                    "timestamp": now.isoformat(),
-                    "ip": primary_ip,
-                    "session": session_id[:8],
-                    "user": matched_user,
-                    "status": "SUCCESS",
-                    "details": reason,
-                }
-                attempt_logger.info(json.dumps(log_entry))
-                display_name = matched_user.capitalize() if isinstance(matched_user, str) else "User"
-                return jsonify(
-                    {
-                        "status": "success",
-                        "message": f"Door open command sent (TEST MODE).\nWelcome home, {display_name}!",
-                    }
-                )
-
-            try:
-                if entity_id.startswith("lock."):
-                    url = f"{ha_url}/api/services/lock/unlock"
-                elif entity_id.startswith("input_boolean."):
-                    url = f"{ha_url}/api/services/input_boolean/turn_on"
-                else:
-                    url = f"{ha_url}/api/services/switch/turn_on"
-                payload = {"entity_id": entity_id}
-                response = requests.post(
-                    url,
-                    headers=ha_headers,
-                    json=payload,
-                    timeout=10,
-                    verify=(ha_ca_bundle or True),
-                )
-                response.raise_for_status()
-                if response.status_code == 200:
-                    reason = "Door opened via OIDC"
-                    log_entry = {
-                        "timestamp": now.isoformat(),
-                        "ip": primary_ip,
-                        "session": session_id[:8],
-                        "user": matched_user,
-                        "status": "SUCCESS",
-                        "details": reason,
-                    }
-                    attempt_logger.info(json.dumps(log_entry))
-                    try:
-                        users_store.touch_user(matched_user)
-                    except Exception:
-                        logger.exception("Error updating touch_user for OIDC open")
-                    display_name = matched_user.capitalize() if isinstance(matched_user, str) else "User"
-                    return jsonify(
-                        {
-                            "status": "success",
-                            "message": f"Door open command sent.\nWelcome home, {display_name}!",
-                        }
-                    )
-                else:
-                    reason = f"Home Assistant API error: {response.status_code}"
-                    log_entry = {
-                        "timestamp": now.isoformat(),
-                        "ip": primary_ip,
-                        "session": session_id[:8],
-                        "user": matched_user,
-                        "status": "FAILURE",
-                        "details": reason,
-                    }
-                    attempt_logger.info(json.dumps(log_entry))
-                    return jsonify({"status": "error", "message": reason}), 500
-            except requests.RequestException as e:
-                logger.error(f"Error communicating with Home Assistant: {e}")
-                return (
-                    jsonify(
-                        {
-                            "status": "error",
-                            "message": "Failed to contact Home Assistant",
-                        }
-                    ),
-                    502,
-                )
-            except Exception as e:
-                reason = "Internal server error during API call"
-                log_entry = {
-                    "timestamp": now.isoformat(),
-                    "ip": primary_ip,
-                    "session": session_id[:8],
-                    "user": matched_user,
-                    "status": "API_FAILURE",
-                    "details": reason,
-                    "exception": str(e),
-                    "traceback": traceback.format_exc(),
-                }
-                attempt_logger.info(json.dumps(log_entry))
-                return jsonify({"status": "error", "message": reason}), 500
+            return _send_open_command(matched_user, primary_ip, session_id, now, via_oidc=True)
 
         # If we reach here, require a PIN (either because provided or policy demands it)
         if not data or "pin" not in data:
@@ -774,15 +788,7 @@ def open_door():
             global_failed_attempts += 1
 
             reason = "Invalid PIN format"  # Error message
-            log_entry = {
-                "timestamp": now.isoformat(),
-                "ip": primary_ip,
-                "session": session_id[:8],
-                "user": "UNKNOWN",
-                "status": "INVALID_FORMAT",
-                "details": reason,
-            }
-            attempt_logger.info(json.dumps(log_entry))
+            log_attempt("INVALID_FORMAT", reason, primary_ip=primary_ip, session_id=session_id, now=now)
             return jsonify({"status": "error", "message": reason}), 400
 
         pin_from_request = validated_pin
@@ -796,49 +802,11 @@ def open_door():
 
         if matched_user:
             # Enforce any active block even on correct PIN before proceeding
-            if (session_blocked_until[session_id] and now < session_blocked_until[session_id]) or (
-                ip_blocked_until[identifier] and now < ip_blocked_until[identifier]
-            ):
-                remaining = 0
-                if session_blocked_until[session_id] and now < session_blocked_until[session_id]:
-                    remaining = max(
-                        remaining,
-                        int((session_blocked_until[session_id] - now).total_seconds()),
-                    )
-                if ip_blocked_until[identifier] and now < ip_blocked_until[identifier]:
-                    remaining = max(
-                        remaining,
-                        int((ip_blocked_until[identifier] - now).total_seconds()),
-                    )
-                reason = f"Access blocked for {remaining} more seconds"
-                log_entry = {
-                    "timestamp": now.isoformat(),
-                    "ip": primary_ip,
-                    "session": session_id[:8],
-                    "user": matched_user,
-                    "status": "BLOCK_ENFORCED",
-                    "details": reason,
-                }
-                attempt_logger.info(json.dumps(log_entry))
-                # Determine latest block end
-                blocked_until_ts = None
-                if session_blocked_until[session_id] and now < session_blocked_until[session_id]:
-                    blocked_until_ts = session_blocked_until[session_id].timestamp()
-                if ip_blocked_until[identifier] and now < ip_blocked_until[identifier]:
-                    ts = ip_blocked_until[identifier].timestamp()
-                    blocked_until_ts = max(blocked_until_ts or ts, ts)
-                return (
-                    jsonify(
-                        {
-                            "status": "error",
-                            "message": "Too many failed attempts. Please try again later.",
-                            "blocked_until": blocked_until_ts,
-                        }
-                    ),
-                    429,
-                )
+            blocked = _enforce_active_block(session_id, identifier, now, primary_ip, matched_user)
+            if blocked is not None:
+                return blocked
 
-            # Reset failed attempts on successful auth (only when no active block)
+            # Reset failed attempts on successful auth (no active block reached here)
             ip_failed_attempts[identifier] = 0
             session_failed_attempts[session_id] = 0
             if identifier in ip_blocked_until:
@@ -847,122 +815,19 @@ def open_door():
                 del session_blocked_until[session_id]
             session.pop("blocked_until_ts", None)
 
-            # Check if test mode is enabled
-            if test_mode:
-                # Test mode: simulate successful door opening without API call
-                reason = "Door opened (TEST MODE)"
-                log_entry = {
-                    "timestamp": now.isoformat(),
-                    "ip": primary_ip,
-                    "session": session_id[:8],
-                    "user": matched_user,
-                    "status": "SUCCESS",
-                    "details": reason,
-                }
-                attempt_logger.info(json.dumps(log_entry))
-                try:
-                    users_store.touch_user(matched_user)
-                except Exception:
-                    logger.exception("Error updating touch_user for PIN open (test mode)")
-                display_name = matched_user.capitalize()
-                return jsonify(
-                    {
-                        "status": "success",
-                        "message": f"Door open command sent (TEST MODE).\nWelcome home, {display_name}!",
-                    }
-                )
-
-            # Production mode: try to open door via Home Assistant
-            try:
-                if entity_id.startswith("lock."):
-                    url = f"{ha_url}/api/services/lock/unlock"
-                elif entity_id.startswith("input_boolean."):
-                    url = f"{ha_url}/api/services/input_boolean/turn_on"
-                else:
-                    url = f"{ha_url}/api/services/switch/turn_on"
-                payload = {"entity_id": entity_id}
-                response = requests.post(
-                    url,
-                    headers=ha_headers,
-                    json=payload,
-                    timeout=10,
-                    verify=(ha_ca_bundle or True),
-                )
-
-                response.raise_for_status()  # Raise an exception for bad status codes
-
-                if response.status_code == 200:
-                    reason = "Door opened"
-                    log_entry = {
-                        "timestamp": now.isoformat(),
-                        "ip": primary_ip,
-                        "session": session_id[:8],
-                        "user": matched_user,
-                        "status": "SUCCESS",
-                        "details": reason,
-                    }
-                    attempt_logger.info(json.dumps(log_entry))
-                    try:
-                        users_store.touch_user(matched_user)
-                    except Exception:
-                        logger.exception("Error updating touch_user for PIN open (prod)")
-                    display_name = matched_user.capitalize()
-                    return jsonify(
-                        {
-                            "status": "success",
-                            "message": f"Door open command sent.\nWelcome home, {display_name}!",
-                        }
-                    )
-                else:
-                    reason = f"Home Assistant API error: {response.status_code}"
-                    log_entry = {
-                        "timestamp": now.isoformat(),
-                        "ip": primary_ip,
-                        "session": session_id[:8],
-                        "user": matched_user,
-                        "status": "FAILURE",
-                        "details": reason,
-                    }
-                    attempt_logger.info(json.dumps(log_entry))
-                    return jsonify({"status": "error", "message": reason}), 500
-            except requests.RequestException as e:
-                logger.error(f"Error communicating with Home Assistant: {e}")
-                return (
-                    jsonify(
-                        {
-                            "status": "error",
-                            "message": "Failed to contact Home Assistant",
-                        }
-                    ),
-                    502,
-                )
-            except Exception as e:
-                reason = "Internal server error during API call"
-                log_entry = {
-                    "timestamp": now.isoformat(),
-                    "ip": primary_ip,
-                    "session": session_id[:8],
-                    "user": matched_user,
-                    "status": "API_FAILURE",
-                    "details": reason,
-                    "exception": str(e),
-                    "traceback": traceback.format_exc(),
-                }
-                attempt_logger.info(json.dumps(log_entry))
-                return jsonify({"status": "error", "message": reason}), 500
+            return _send_open_command(matched_user, primary_ip, session_id, now)
         else:
             # Check if the PIN belongs to a disabled store user before treating as wrong PIN
             disabled_user = users_store.find_disabled_user_by_pin(pin_from_request)
             if disabled_user:
-                log_entry = {
-                    "timestamp": now.isoformat(),
-                    "ip": primary_ip,
-                    "session": session_id[:8],
-                    "user": disabled_user,
-                    "status": "DISABLED_USER",
-                    "details": "Access denied: account disabled",
-                }
-                attempt_logger.info(json.dumps(log_entry))
+                log_attempt(
+                    "DISABLED_USER",
+                    "Access denied: account disabled",
+                    user=disabled_user,
+                    primary_ip=primary_ip,
+                    session_id=session_id,
+                    now=now,
+                )
                 return (
                     jsonify(
                         {
@@ -990,15 +855,7 @@ def open_door():
             else:
                 reason = "Invalid PIN"
 
-            log_entry = {
-                "timestamp": now.isoformat(),
-                "ip": primary_ip,
-                "session": session_id[:8],
-                "user": "UNKNOWN",
-                "status": "AUTH_FAILURE",
-                "details": reason,
-            }
-            attempt_logger.info(json.dumps(log_entry))
+            log_attempt("AUTH_FAILURE", reason, primary_ip=primary_ip, session_id=session_id, now=now)
             # Include blocked_until if a block is now active
             resp = {"status": "error", "message": reason}
             if session_blocked_until[session_id] and now < session_blocked_until[session_id]:
@@ -1014,15 +871,12 @@ def open_door():
             primary_ip = request.remote_addr
             session_id = "unknown"
 
-        log_entry = {
-            "timestamp": get_current_time().isoformat(),
-            "ip": primary_ip,
-            "session": session_id[:8] if session_id != "unknown" else "unknown",
-            "user": "UNKNOWN",
-            "status": "EXCEPTION",
-            "details": f"Exception in open_door: {e}",
-        }
-        attempt_logger.info(json.dumps(log_entry))
+        log_attempt(
+            "EXCEPTION",
+            f"Exception in open_door: {e}",
+            primary_ip=primary_ip,
+            session_id=session_id if session_id != "unknown" else None,
+        )
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 

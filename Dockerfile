@@ -24,5 +24,9 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 EXPOSE 6532
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-# Use gunicorn with environment variable for port; entrypoint will drop privileges
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${DOOROPENER_PORT:-6532} app:app --workers 2 --threads 2 --timeout 60"]
+# Use gunicorn with environment variable for port; entrypoint will drop privileges.
+# NOTE: must stay at --workers 1. Rate-limiting/brute-force counters live in
+# process memory (see app.py), so multiple workers would each keep their own
+# counters and an attacker would get N times the allowed attempts. Concurrency
+# is provided via threads instead.
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${DOOROPENER_PORT:-6532} app:app --workers 1 --threads 4 --timeout 60"]
