@@ -2017,9 +2017,24 @@
             if ('serviceWorker' in navigator) {
                 navigator.serviceWorker.register('/service-worker.js').catch(() => { /* ignore */ });
             }
-            // Initial battery level fetch, then refresh every 60 seconds
-            fetchBatteryLevel();
-            setInterval(fetchBatteryLevel, 60000);
+            // Battery polling: refresh every 60s, but only while the tab is visible
+            // so a backgrounded keypad doesn't keep hitting the server (and HA).
+            let batteryPollTimer = null;
+            function startBatteryPolling() {
+                if (batteryPollTimer !== null) return;
+                fetchBatteryLevel();
+                batteryPollTimer = setInterval(fetchBatteryLevel, 60000);
+            }
+            function stopBatteryPolling() {
+                if (batteryPollTimer === null) return;
+                clearInterval(batteryPollTimer);
+                batteryPollTimer = null;
+            }
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) stopBatteryPolling();
+                else startBatteryPolling();
+            });
+            if (!document.hidden) startBatteryPolling();
 
             // Check for a newer release on GitHub (non-blocking, once per session)
             checkForUpdate("{{ app_version }}");

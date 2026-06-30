@@ -197,6 +197,19 @@ def test_battery_exception_returns_none(client, monkeypatch):
         assert response.get_json()["level"] is None
 
 
+def test_battery_result_is_cached(client, monkeypatch):
+    # Two requests within the TTL should only hit Home Assistant once.
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"state": "87"}
+    with patch("requests.get", return_value=mock_response) as mock_get:
+        first = client.get("/battery")
+        second = client.get("/battery")
+        assert first.get_json()["level"] == 87
+        assert second.get_json()["level"] == 87
+        assert mock_get.call_count == 1
+
+
 def test_auth_status_oidc_disabled_ignores_stale_session(client):
     # Explicitly disable OIDC to ensure gating is respected even with stale session keys
     import app as app_module
