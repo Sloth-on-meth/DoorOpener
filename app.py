@@ -435,7 +435,6 @@ def index():
 def battery():
     """Get battery level from Home Assistant battery sensor entity"""
     try:
-        logger.info(f"Battery endpoint called - fetching state for entity: {battery_entity}")
         url = f"{ha_url}/api/states/{battery_entity}"
         response = requests.get(
             url,
@@ -443,32 +442,29 @@ def battery():
             timeout=10,
             verify=(ha_ca_bundle or True),
         )
+        if response.status_code == 404:
+            # Entity doesn't exist — lock has no battery sensor, ignore silently
+            return jsonify({"level": None})
         if response.status_code == 200:
             state_data = response.json()
             battery_level = state_data.get("state")
-            logger.info(f"Battery response: {state_data}")
-
-            # Handle different battery level formats
             if battery_level is not None:
                 try:
-                    # Convert to float and ensure it's a valid percentage
                     battery_float = float(battery_level)
                     if 0 <= battery_float <= 100:
                         return jsonify({"level": int(battery_float)})
                     else:
-                        logger.warning(f"Battery level out of range: {battery_float}")
+                        logger.debug(f"Battery level out of range: {battery_float}")
                         return jsonify({"level": None})
                 except (ValueError, TypeError):
-                    logger.warning(f"Invalid battery level format: {battery_level}")
+                    logger.debug(f"Invalid battery level format: {battery_level}")
                     return jsonify({"level": None})
-            else:
-                logger.warning("Battery level is None")
-                return jsonify({"level": None})
+            return jsonify({"level": None})
         else:
-            logger.error(f"Failed to fetch battery state: {response.status_code} {response.text}")
+            logger.debug(f"Battery fetch returned {response.status_code} for {battery_entity}")
             return jsonify({"level": None})
     except Exception as e:
-        logger.error(f"Exception fetching battery: {e}")
+        logger.debug(f"Exception fetching battery: {e}")
         return jsonify({"level": None})
 
 
