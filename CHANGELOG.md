@@ -1,3 +1,25 @@
+## v[1.14.0] - 2026-06-30
+
+### 🔐 Security & Hardening
+- **Pinned to a single Gunicorn worker** — `Dockerfile` changed from `--workers 2 --threads 2` to `--workers 1 --threads 4`. The brute-force/rate-limit counters live in process memory, so running multiple workers multiplied the effective allowed attempts (and the global hourly cap). Concurrency is preserved via threads. A comment in the `Dockerfile` documents why this must stay at one worker.
+- **Bounded rate-limit memory growth** — added a self-throttled `_cleanup_rate_limit_state()` (runs at most once every 5 minutes from the `before_request` hook). Last-seen times are recorded in `get_client_identifier`, and the sweep evicts idle IP/session/identifier keys from the rate-limit `defaultdict`s, drops expired block timestamps, and prunes the problem-report window. These structures previously only ever grew — a slow memory-exhaustion vector under long uptime or IP/session rotation.
+
+### ⚡ Performance
+- **Battery reads are cached server-side** — `/battery` is wrapped in a 30s TTL cache (`_fetch_battery_level()` does the actual upstream read). The keypad page polls every 60s per open client; the cache collapses N concurrent clients into at most one Home Assistant read per window.
+- **Battery polling pauses when the tab is hidden** — polling now starts/stops on `visibilitychange`, so a backgrounded keypad stops hitting the server (and HA); it resumes with an immediate fetch when the tab is shown again.
+
+### 🛠️ Technical
+- **`open_door` deduplicated (~250 fewer lines)** — extracted `log_attempt()`, `_ha_service_url()`, `_enforce_active_block()`, and `_send_open_command()`. The two near-identical ~75-line HA-call blocks (OIDC + PIN) collapsed into one helper, the two block-enforcement blocks into one, and ~20 inline log dicts into `log_attempt()` calls. Side benefit: OIDC test-mode opens now also call `touch_user`, consistent with the PIN path.
+- **Consolidated logging setup** — `logging.basicConfig` now runs once up front (console + `door_access.log`), the application `logger` is assigned a single time (no more triple reassignment / `__name__` shadowing), and the audit logger keeps its dedicated `log.txt` handler.
+
+### 🐛 Bug Fixes
+- **`.env.example` default port** — corrected from `5000` to `6532` to match the rest of the app.
+
+### 🧪 Tests
+- Added a regression test asserting two `/battery` requests within the TTL trigger only one upstream call; the battery cache is reset per-test in `conftest.py`.
+
+---
+
 ## v[1.13.1] - 2026-04-09
 
 ### ✨ Features
