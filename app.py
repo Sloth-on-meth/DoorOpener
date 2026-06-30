@@ -238,6 +238,10 @@ else:
 # Headers for HA API requests
 ha_headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
 
+# Short-lived cache of the last battery read, shared across all polling clients.
+BATTERY_CACHE_TTL = 30  # seconds
+_battery_cache: dict = {"level": None, "ts": 0.0}
+
 # --- Enhanced Security & Rate Limiting ---
 ip_failed_attempts = defaultdict(int)
 ip_blocked_until = defaultdict(lambda: None)
@@ -481,41 +485,49 @@ def index():
     )
 
 
-@app.route("/battery")
-def battery():
-    """Get battery level from Home Assistant battery sensor entity"""
+def _fetch_battery_level():
+    """Read the battery level from Home Assistant. Returns an int 0-100, or None when
+    there is no battery sensor or the value is unavailable/invalid."""
     try:
         url = f"{ha_url}/api/states/{battery_entity}"
-        response = requests.get(
-            url,
-            headers=ha_headers,
-            timeout=10,
-            verify=(ha_ca_bundle or True),
-        )
+        response = requests.get(url, headers=ha_headers, timeout=10, verify=(ha_ca_bundle or True))
         if response.status_code == 404:
             # Entity doesn't exist — lock has no battery sensor, ignore silently
-            return jsonify({"level": None})
-        if response.status_code == 200:
-            state_data = response.json()
-            battery_level = state_data.get("state")
-            if battery_level is not None:
-                try:
-                    battery_float = float(battery_level)
-                    if 0 <= battery_float <= 100:
-                        return jsonify({"level": int(battery_float)})
-                    else:
-                        logger.debug(f"Battery level out of range: {battery_float}")
-                        return jsonify({"level": None})
-                except (ValueError, TypeError):
-                    logger.debug(f"Invalid battery level format: {battery_level}")
-                    return jsonify({"level": None})
-            return jsonify({"level": None})
-        else:
+            return None
+        if response.status_code != 200:
             logger.debug(f"Battery fetch returned {response.status_code} for {battery_entity}")
-            return jsonify({"level": None})
+            return None
+        battery_level = response.json().get("state")
+        if battery_level is None:
+            return None
+        try:
+            battery_float = float(battery_level)
+        except (ValueError, TypeError):
+            logger.debug(f"Invalid battery level format: {battery_level}")
+            return None
+        if 0 <= battery_float <= 100:
+            return int(battery_float)
+        logger.debug(f"Battery level out of range: {battery_float}")
+        return None
     except Exception as e:
         logger.debug(f"Exception fetching battery: {e}")
-        return jsonify({"level": None})
+        return None
+
+
+@app.route("/battery")
+def battery():
+    """Get battery level from Home Assistant, cached briefly.
+
+    The keypad page polls this every 60s per open client; the cache collapses N
+    concurrent clients into at most one upstream read per BATTERY_CACHE_TTL window.
+    """
+    now_mono = time.monotonic()
+    if now_mono - _battery_cache["ts"] < BATTERY_CACHE_TTL:
+        return jsonify({"level": _battery_cache["level"]})
+    level = _fetch_battery_level()
+    _battery_cache["level"] = level
+    _battery_cache["ts"] = now_mono
+    return jsonify({"level": level})
 
 
 def log_attempt(status, details, *, user="UNKNOWN", primary_ip=None, session_id=None, now=None, extra=None):

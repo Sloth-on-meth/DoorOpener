@@ -74,6 +74,8 @@ def reset_app_globals(monkeypatch):
     monkeypatch.setattr(app_module, "session_blocked_until", defaultdict(lambda: None))
     monkeypatch.setattr(app_module, "global_failed_attempts", 0)
     monkeypatch.setattr(app_module, "global_last_reset", app_module.get_current_time())
+    # Reset the battery cache so each test triggers a fresh (mocked) fetch.
+    monkeypatch.setattr(app_module, "_battery_cache", {"level": None, "ts": 0.0})
     monkeypatch.setattr(app_module, "user_pins", {})
     monkeypatch.setattr(app_module, "oauth", None)
     monkeypatch.setattr(app_module, "test_mode", True)
