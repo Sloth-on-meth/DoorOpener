@@ -1761,6 +1761,11 @@ def admin_users_create():
                 jsonify({"error": "User exists in config and cannot be edited via UI"}),
                 409,
             )
+        # Duplicate PIN check across config pins and store users
+        if any(cfg_pin == pin for cfg_pin in user_pins.values()):
+            return jsonify({"error": "PIN already in use by another user"}), 409
+        if users_store.pin_exists(pin):
+            return jsonify({"error": "PIN already in use by another user"}), 409
         users_store.create_user(username, pin, active)
         attempt_logger.info(
             json.dumps(
@@ -1796,6 +1801,11 @@ def admin_users_update(username: str):
         body = request.get_json(silent=True) or {}
         pin = body.get("pin")
         active = body.get("active")
+        if pin is not None:
+            if any(cfg_pin == pin for cfg_user, cfg_pin in user_pins.items() if cfg_user != username):
+                return jsonify({"error": "PIN already in use by another user"}), 409
+            if users_store.pin_exists(pin, exclude_username=username):
+                return jsonify({"error": "PIN already in use by another user"}), 409
         users_store.update_user(username, pin=pin, active=active)
         attempt_logger.info(
             json.dumps(

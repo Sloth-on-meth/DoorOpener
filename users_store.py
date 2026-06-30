@@ -191,3 +191,14 @@ class UsersStore:
                 if isinstance(stored_pin, str) and hmac.compare_digest(pin, stored_pin):
                     return username
         return None
+
+    def pin_exists(self, pin: str, exclude_username: Optional[str] = None) -> bool:
+        """Return True if the PIN is already assigned to any store user (excluding one username)."""
+        self._ensure_loaded()
+        for username, meta in self.data["users"].items():
+            if exclude_username is not None and username == exclude_username:
+                continue
+            stored_pin = meta.get("pin", "")
+            if isinstance(stored_pin, str) and stored_pin == pin:
+                return True
+        return False

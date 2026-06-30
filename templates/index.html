@@ -104,8 +104,9 @@
         @media (max-width: 480px) {
             body {
                 padding: 10px;
-                align-items: flex-start;
                 padding-top: 60px;
+                padding-bottom: 80px;
+                align-items: flex-start;
             }
 
             .container {
@@ -141,6 +142,10 @@
 
             #battery-level {
                 font-size: 0.75rem;
+            }
+
+            .report-btn-text {
+                display: none;
             }
         }
 
@@ -867,7 +872,8 @@
 
         /* PIN display */
         #pinDisplay {
-            width: 300px;
+            width: 100%;
+            max-width: 300px;
             margin: 0 auto 1.5rem;
             padding: 14px 18px;
             font-size: 24px;
@@ -898,7 +904,8 @@
             grid-template-columns: repeat(3, 1fr);
             gap: 12px;
             margin: 0 auto 1.5rem;
-            width: 300px;
+            width: 100%;
+            max-width: 300px;
         }
 
         /* OIDC buttons */
@@ -1299,7 +1306,7 @@
         {% if pushbullet_enabled %}
         <button class="report-btn" id="reportProblemBtn">
             <span class="report-btn-icon">!</span>
-            Door not opening? Report the issue here
+            <span class="report-btn-text">Door not opening? Report the issue here</span>
         </button>
         {% endif %}
     </div>
@@ -1792,17 +1799,16 @@
         }
 
         function updateBatteryLevel(level) {
+            const container = document.getElementById('battery-container');
             const batteryFill = document.getElementById('battery-fill');
             const batteryLevelEl = document.getElementById('battery-level');
-            if (batteryLevelEl) {
-                batteryLevelEl.textContent = (level !== null && level !== undefined) ? `${level}%` : '--';
-            }
-            if (!batteryFill) return;
             if (level === null || level === undefined) {
-                batteryFill.style.width = '0%';
-                batteryFill.style.background = 'rgba(0,0,0,0.15)';
+                if (container) container.style.display = 'none';
                 return;
             }
+            if (container) container.style.display = 'flex';
+            if (batteryLevelEl) batteryLevelEl.textContent = `${level}%`;
+            if (!batteryFill) return;
             batteryFill.style.width = `${level}%`;
             if (level >= 80) {
                 batteryFill.style.background = 'linear-gradient(90deg, #4CAF50 0%, #8BC34A 100%)';
