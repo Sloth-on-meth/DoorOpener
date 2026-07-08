@@ -1,11 +1,16 @@
 import hmac
 import json
 import os
+import shutil
 import tempfile
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 ISO_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
+
+
+class UsersStoreError(RuntimeError):
+    """Raised when the on-disk users store cannot be safely read or written."""
 
 
 def _now_iso() -> str:
@@ -31,45 +36,84 @@ class UsersStore:
         self.data: Dict[str, Any] = {"users": {}}
 
     def _load_file(self) -> None:
-        try:
-            if os.path.exists(self.path):
-                with open(self.path, "r", encoding="utf-8") as f:
-                    self.data = json.load(f)
-                    if "users" not in self.data or not isinstance(self.data["users"], dict):
-                        self.data = {"users": {}}
-            else:
-                # ensure directory exists
-                os.makedirs(os.path.dirname(self.path), exist_ok=True)
-                self.data = {"users": {}}
-        except Exception:
-            # fallback to empty on any error
+        if not os.path.exists(self.path):
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
             self.data = {"users": {}}
+            return
+        try:
+            with open(self.path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except OSError as e:
+            raise UsersStoreError(f"Cannot read users store at {self.path}: {e}") from e
+        if content.strip() == "":
+            # A freshly-created/empty file (e.g. touch'd but never written) has no
+            # data to lose, so it's safe to treat like a missing file.
+            self.data = {"users": {}}
+            return
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError as e:
+            # Do NOT fall back to {"users": {}} here. Every mutation loads then
+            # immediately re-saves self.data, so treating a corrupt file as "no
+            # users" would let the very next login or admin edit permanently
+            # overwrite the real data with an empty store. Fail loudly instead
+            # and leave the on-disk file untouched.
+            raise UsersStoreError(f"Cannot parse users store at {self.path}: {e}") from e
+        if not isinstance(data, dict) or not isinstance(data.get("users"), dict):
+            raise UsersStoreError(f"Users store at {self.path} has an unexpected format")
+        self.data = data
 
     def _save_atomic(self) -> None:
         dir_path = os.path.dirname(self.path)
         os.makedirs(dir_path, exist_ok=True)
         # Prefer writing the temp file next to the target (same filesystem = atomic
-        # rename). Fall back to /tmp when the app directory is read-only, e.g. when
-        # users.json is a Docker bind-mount on an otherwise immutable image layer.
+        # rename). Fall back to /tmp when the app directory can't take a new file,
+        # e.g. when users.json is a single-file Docker bind-mount, or the primary
+        # filesystem is out of space/inodes.
+        tmp_path = None
         for tmp_dir in (dir_path, tempfile.gettempdir()):
             try:
                 fd, tmp_path = tempfile.mkstemp(dir=tmp_dir, suffix=".tmp")
                 break
-            except PermissionError:
+            except OSError:
                 continue
         else:
-            raise PermissionError(f"Cannot create temp file in {dir_path} or {tempfile.gettempdir()}")
+            raise UsersStoreError(f"Cannot create temp file in {dir_path} or {tempfile.gettempdir()}")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(self.data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
             try:
-                # Same filesystem: atomic rename
+                # Same filesystem: atomic rename, no window where the file is
+                # missing or half-written.
                 os.replace(tmp_path, self.path)
             except OSError:
-                # Cross-device (tmp in /tmp, target is a bind-mount): copy content
-                # only — no metadata — then remove the temp file.
-                with open(tmp_path, "r", encoding="utf-8") as src, open(self.path, "w", encoding="utf-8") as dst:
-                    dst.write(src.read())
+                # Cross-device: os.replace() can't atomically rename here, so
+                # back up the existing file before overwriting it. If the copy
+                # below fails partway (disk fills up, process killed), restore
+                # from the backup instead of leaving users.json truncated.
+                backup_path = self.path + ".bak"
+                has_existing = os.path.exists(self.path)
+                if has_existing:
+                    shutil.copy2(self.path, backup_path)
+                try:
+                    with open(tmp_path, "r", encoding="utf-8") as src:
+                        content = src.read()
+                    with open(self.path, "w", encoding="utf-8") as dst:
+                        dst.write(content)
+                        dst.flush()
+                        os.fsync(dst.fileno())
+                except Exception:
+                    if has_existing:
+                        shutil.copy2(backup_path, self.path)
+                    raise
+                finally:
+                    if has_existing:
+                        try:
+                            os.remove(backup_path)
+                        except OSError:
+                            pass
                 os.remove(tmp_path)
         except Exception:
             try:
