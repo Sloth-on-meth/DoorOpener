@@ -66,3 +66,46 @@ def test_readme_admin_example_is_a_rejected_placeholder(app_module):
     values = re.findall(r"^admin_password = (.*)$", text, flags=re.M)
     assert values
     assert all(v.strip().lower() in app_module._PLACEHOLDER_ADMIN_PASSWORDS for v in values)
+
+
+def test_startup_rejects_the_shipped_example_config(tmp_path):
+    """End to end: copy config.ini.example verbatim and boot the app, as a careless operator would.
+
+    conftest mocks ConfigParser, so run the real thing in a subprocess against a throwaway copy.
+    """
+    import os
+    import shutil
+    import subprocess
+    import sys
+
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    work = tmp_path / "app"
+    work.mkdir()
+    for name in os.listdir(root):
+        if name.endswith(".py"):
+            shutil.copy(os.path.join(root, name), work / name)
+    for d in ("templates", "static"):
+        shutil.copytree(os.path.join(root, d), work / d)
+    shutil.copy(os.path.join(root, "config.ini.example"), work / "config.ini")
+
+    # Drop pytest-cov's env vars so this throwaway copy isn't measured (see test_config_percent).
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("COV_CORE", "COVERAGE", "DOOROPENER_ALLOW"))}
+    env.update(
+        DOOROPENER_LOG_DIR=str(tmp_path / "logs"),
+        USERS_STORE_PATH=str(tmp_path / "u.json"),
+        FLASK_SECRET_KEY="x" * 32,
+    )
+    code = f"import sys; sys.path.insert(0, {str(work)!r}); import app"
+
+    rejected = subprocess.run([sys.executable, "-I", "-c", code], cwd=work, env=env, capture_output=True, text=True)
+    assert rejected.returncode != 0
+    assert "well-known default" in rejected.stderr
+
+    allowed = subprocess.run(
+        [sys.executable, "-I", "-c", code],
+        cwd=work,
+        env={**env, "DOOROPENER_ALLOW_INSECURE_DEFAULTS": "true"},
+        capture_output=True,
+        text=True,
+    )
+    assert allowed.returncode == 0, allowed.stderr[-1500:]
