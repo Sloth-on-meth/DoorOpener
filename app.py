@@ -346,7 +346,7 @@ def _cleanup_rate_limit_state():
     """Evict idle per-client rate-limit entries to bound memory use.
 
     Throttled to run at most once per RATE_LIMIT_CLEANUP_INTERVAL. Keys idle longer
-    than the longest meaningful window (block time and the global hourly window) are
+    than the longest meaningful window (the maximum backoff block and the global hourly window) are
     safe to drop: by then any block has expired and the global counter has reset.
     """
     global _last_cleanup_mono
@@ -356,7 +356,9 @@ def _cleanup_rate_limit_state():
     _last_cleanup_mono = now_mono
 
     now = get_current_time()
-    ttl_seconds = max(BLOCK_TIME.total_seconds(), 3600) + 600
+    # Must outlast the longest block we can hand out (exponential backoff caps at MAX_BLOCK_TIME),
+    # otherwise an idle client's block could be evicted and forgotten before it expires.
+    ttl_seconds = max(BLOCK_TIME.total_seconds(), MAX_BLOCK_TIME.total_seconds(), 3600) + 600
     cutoff = now_mono - ttl_seconds
 
     stale_keys = [k for k, seen in _rate_limit_last_seen.items() if seen < cutoff]
@@ -423,12 +425,14 @@ def _notify_admin(title, body):
     if not pushbullet_token:
         return
     try:
-        requests.post(
+        resp = requests.post(
             "https://api.pushbullet.com/v2/pushes",
             headers={"Access-Token": pushbullet_token, "Content-Type": "application/json"},
             json={"type": "note", "title": title, "body": body},
             timeout=8,
         )
+        # requests.post() returns normally on HTTP errors; surface a rejected alert to operators.
+        resp.raise_for_status()
     except requests.RequestException as e:
         logger.error(f"Pushbullet alert failed: {e}")
 
