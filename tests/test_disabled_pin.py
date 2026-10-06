@@ -16,6 +16,7 @@ def test_disabled_user_pin_counts_and_looks_like_wrong_pin(client, tmp_path, mon
     assert disabled.status_code == wrong.status_code == 401
     assert disabled.get_json()["message"] == wrong.get_json()["message"]
     assert sum(app_module.ip_failed_attempts.values()) == 2
+    assert sum(app_module.session_failed_attempts.values()) == 2
     assert app_module.global_failed_attempts == 2
 
 
