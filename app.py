@@ -211,12 +211,23 @@ if not admin_password:
     raise RuntimeError(
         "No admin password configured. Set [admin] admin_password in config.ini or ensure the config file exists."
     )
-if admin_password.strip().lower() in _PLACEHOLDER_ADMIN_PASSWORDS and not _ALLOW_INSECURE:
+_HASH_PREFIXES = ("scrypt:", "pbkdf2:")
+
+
+def _admin_password_is_default() -> bool:
+    """True if admin_password is a known default, either verbatim or as a hash of one."""
+    if admin_password.strip().lower() in _PLACEHOLDER_ADMIN_PASSWORDS:
+        return True
+    if admin_password.startswith(_HASH_PREFIXES):
+        return any(check_password_hash(admin_password, candidate) for candidate in _PLACEHOLDER_ADMIN_PASSWORDS)
+    return False
+
+
+if _admin_password_is_default() and not _ALLOW_INSECURE:
     raise RuntimeError(
         "Refusing to start: [admin] admin_password is still a well-known default. Set a real password "
         "(or a hash: python -c \"from werkzeug.security import generate_password_hash as g; print(g('...'))\")."
     )
-_HASH_PREFIXES = ("scrypt:", "pbkdf2:")
 
 
 def verify_admin_password(candidate: str) -> bool:

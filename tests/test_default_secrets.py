@@ -46,3 +46,23 @@ def test_plaintext_admin_password_with_non_ascii(app_module, monkeypatch):
     monkeypatch.setattr(app_module, "admin_password", "pässwörd-1")
     assert app_module.verify_admin_password("pässwörd-1")
     assert not app_module.verify_admin_password("passwoerd-1")
+
+
+def test_hash_of_a_default_admin_password_is_detected(app_module, monkeypatch):
+    from werkzeug.security import generate_password_hash
+
+    monkeypatch.setattr(app_module, "admin_password", generate_password_hash("admin123"))
+    assert app_module._admin_password_is_default()
+    monkeypatch.setattr(app_module, "admin_password", generate_password_hash("a-genuinely-strong-one"))
+    assert not app_module._admin_password_is_default()
+
+
+def test_readme_admin_example_is_a_rejected_placeholder(app_module):
+    """The README line is copy-pasted; ConfigParser would keep any inline '# ...' as part of the value."""
+    import os
+    import re
+
+    text = open(os.path.join(os.path.dirname(__file__), "..", "README.md")).read()
+    values = re.findall(r"^admin_password = (.*)$", text, flags=re.M)
+    assert values
+    assert all(v.strip().lower() in app_module._PLACEHOLDER_ADMIN_PASSWORDS for v in values)

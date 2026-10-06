@@ -119,8 +119,10 @@ switch_entity = switch.your_door_opener
 # ca_bundle = /etc/dooropener/ha-ca.pem       # custom CA for self-signed HA certs
 
 [admin]
-admin_password = <a real password, or a hash>   # app refuses well-known defaults; hash with
-# python -c "from werkzeug.security import generate_password_hash as g; print(g('your password'))"
+# Replace with a real password or a Werkzeug hash; startup rejects this placeholder.
+# Generate a hash with:
+#   python -c "from werkzeug.security import generate_password_hash as g; print(g('your password'))"
+admin_password = change-me
 
 [server]
 port = 6532
