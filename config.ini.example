@@ -26,6 +26,10 @@ admin_password = admin123
 # Can be overridden by DOOROPENER_PORT environment variable
 port = 6532
 
+# Reverse proxies in front of the app whose X-Forwarded-For is trusted (0 = direct access).
+# Can be overridden by DOOROPENER_TRUSTED_PROXIES.
+trusted_proxies = 1
+
 # Test mode - when true, shows success message but doesn't actually open door
 test_mode = false
 

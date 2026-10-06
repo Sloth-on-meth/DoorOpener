@@ -99,6 +99,8 @@ python app.py
 ```bash
 FLASK_SECRET_KEY=change-me-to-something-long-and-random   # required
 DOOROPENER_PORT=6532          # default 6532
+DOOROPENER_BIND=127.0.0.1     # interface docker-compose publishes the port on (keep local behind a reverse proxy)
+DOOROPENER_TRUSTED_PROXIES=1  # reverse proxies whose X-Forwarded-For is trusted; 0 if clients connect directly
 TZ=Europe/Amsterdam           # default UTC
 PUID=1000                     # aligns container user to your host user
 PGID=1000

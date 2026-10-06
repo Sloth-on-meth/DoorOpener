@@ -97,7 +97,6 @@ attempt_logger.handlers = [_attempt_handler]
 
 # --- Flask App Setup ---
 app = Flask(__name__)
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 # Prefer fixed secret from environment; fallback to temporary random (will be overridden by config.ini later if present)
 _env_secret = os.environ.get("FLASK_SECRET_KEY")
 if _env_secret:
@@ -173,6 +172,16 @@ if not admin_password:
 # Server Configuration
 server_port = int(os.environ.get("DOOROPENER_PORT", config.getint("server", "port", fallback=6532)))
 test_mode = config.getboolean("server", "test_mode", fallback=False)
+
+# Number of reverse proxies in front of the app whose X-Forwarded-* headers we trust. Every rate
+# limit keys on the client IP, so trusting more hops than actually exist lets any caller who can
+# reach the port directly pick their own IP via a forged X-Forwarded-For. 0 = no proxy (use the
+# socket address). Default 1 matches a single reverse proxy such as Traefik/nginx/Caddy.
+TRUSTED_PROXIES = int(
+    os.environ.get("DOOROPENER_TRUSTED_PROXIES", config.getint("server", "trusted_proxies", fallback=1))
+)
+if TRUSTED_PROXIES > 0:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=TRUSTED_PROXIES, x_proto=TRUSTED_PROXIES, x_host=TRUSTED_PROXIES)
 if test_mode:
     logging.getLogger("dooropener").warning(
         "TEST MODE ENABLED — the door will NOT open. "
@@ -314,7 +323,8 @@ def manifest_file():
 
 def get_client_identifier():
     """Get client identifier using multiple factors for better security"""
-    # Use request.remote_addr as primary (can't be spoofed easily)
+    # request.remote_addr is the only attacker-independent factor (given a correct
+    # TRUSTED_PROXIES setting); everything else a client sends can be varied per request.
     primary_ip = request.remote_addr
 
     # Create session-based identifier if available
@@ -323,12 +333,9 @@ def get_client_identifier():
         session_id = secrets.token_hex(16)
         session["_session_id"] = session_id
 
-    # Combine multiple factors for identifier
-    user_agent = request.headers.get("User-Agent", "")[:100]  # Limit length
-    accept_lang = request.headers.get("Accept-Language", "")[:50]
-
-    # Create composite identifier (harder to spoof than just IP)
-    identifier = f"{primary_ip}:{hash(user_agent + accept_lang) % 10000}"
+    # The throttling identifier must NOT include client-controlled headers (User-Agent,
+    # Accept-Language): rotating them would hand an attacker a fresh failure counter per request.
+    identifier = primary_ip
 
     # Record activity so idle rate-limit state for these keys can be evicted later.
     now_mono = time.monotonic()
