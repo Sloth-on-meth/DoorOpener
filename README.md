@@ -97,7 +97,7 @@ python app.py
 ### .env
 
 ```bash
-FLASK_SECRET_KEY=change-me-to-something-long-and-random   # required
+FLASK_SECRET_KEY=<64 hex chars>   # required, min 16 chars; python -c "import secrets; print(secrets.token_hex(32))"
 DOOROPENER_PORT=6532          # default 6532
 TZ=Europe/Amsterdam           # default UTC
 PUID=1000                     # aligns container user to your host user
@@ -119,7 +119,8 @@ switch_entity = switch.your_door_opener
 # ca_bundle = /etc/dooropener/ha-ca.pem       # custom CA for self-signed HA certs
 
 [admin]
-admin_password = change-me
+admin_password = <a real password, or a hash>   # app refuses well-known defaults; hash with
+# python -c "from werkzeug.security import generate_password_hash as g; print(g('your password'))"
 
 [server]
 port = 6532

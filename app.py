@@ -36,6 +36,7 @@ from flask import (
     url_for,
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import check_password_hash
 
 from users_store import UsersStore
 
@@ -98,9 +99,47 @@ attempt_logger.handlers = [_attempt_handler]
 # --- Flask App Setup ---
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+# Values that must never be used as a signing key: anything in a public repo or example file
+# lets an attacker forge session cookies (including admin_authenticated=True).
+MIN_SECRET_KEY_LENGTH = 16
+_PLACEHOLDER_SECRETS = {
+    "your-secret-key-here",
+    "change-me-to-something-long-and-random",
+    "changeme",
+    "change-me",
+    "secret",
+    "secret_key",
+    "dev",
+    "test",
+}
+_PLACEHOLDER_ADMIN_PASSWORDS = {
+    "admin123",
+    "admin",
+    "password",
+    "changeme",
+    "change-me",
+    "change-me-to-a-real-password",
+    "your_admin_password",
+    "",
+}
+_ALLOW_INSECURE = os.environ.get("DOOROPENER_ALLOW_INSECURE_DEFAULTS", "").lower() == "true"
+
+
+def _reject_weak_secret(value: str, source: str) -> None:
+    if _ALLOW_INSECURE:
+        return
+    if value.strip().lower() in _PLACEHOLDER_SECRETS or len(value) < MIN_SECRET_KEY_LENGTH:
+        raise RuntimeError(
+            f"Refusing to start: {source} is a placeholder or shorter than {MIN_SECRET_KEY_LENGTH} characters, "
+            "so session cookies could be forged. Generate one with: "
+            'python -c "import secrets; print(secrets.token_hex(32))"'
+        )
+
+
 # Prefer fixed secret from environment; fallback to temporary random (will be overridden by config.ini later if present)
 _env_secret = os.environ.get("FLASK_SECRET_KEY")
 if _env_secret:
+    _reject_weak_secret(_env_secret, "FLASK_SECRET_KEY")
     app.secret_key = _env_secret
     app.config["RANDOM_SECRET_WARNING"] = False
 else:
@@ -137,6 +176,7 @@ if not _env_secret:
     try:
         _cfg_secret = config.get("server", "secret_key", fallback=None)
         if _cfg_secret:
+            _reject_weak_secret(_cfg_secret, "[server] secret_key")
             app.secret_key = _cfg_secret
             app.config["RANDOM_SECRET_WARNING"] = False
         elif app.config.get("RANDOM_SECRET_WARNING"):
@@ -144,6 +184,8 @@ if not _env_secret:
                 "FLASK_SECRET_KEY not set and no [server] secret_key in config.ini; "
                 "sessions may become invalid across restarts or multiple workers."
             )
+    except RuntimeError:
+        raise
     except Exception as e:  # nosec B110 - logging warning is best-effort; failure is non-critical
         logging.getLogger("dooropener").warning(f"Could not read secret_key from config.ini: {e}")
 
@@ -169,6 +211,23 @@ if not admin_password:
     raise RuntimeError(
         "No admin password configured. Set [admin] admin_password in config.ini or ensure the config file exists."
     )
+if admin_password.strip().lower() in _PLACEHOLDER_ADMIN_PASSWORDS and not _ALLOW_INSECURE:
+    raise RuntimeError(
+        "Refusing to start: [admin] admin_password is still a well-known default. Set a real password "
+        "(or a hash: python -c \"from werkzeug.security import generate_password_hash as g; print(g('...'))\")."
+    )
+_HASH_PREFIXES = ("scrypt:", "pbkdf2:")
+
+
+def verify_admin_password(candidate: str) -> bool:
+    """Check a login attempt against admin_password, which may be plaintext or a werkzeug hash.
+
+    Plaintext is compared as bytes: hmac.compare_digest raises TypeError on non-ASCII str.
+    """
+    if admin_password.startswith(_HASH_PREFIXES):
+        return check_password_hash(admin_password, candidate)
+    return hmac.compare_digest(candidate.encode("utf-8"), admin_password.encode("utf-8"))
+
 
 # Server Configuration
 server_port = int(os.environ.get("DOOROPENER_PORT", config.getint("server", "port", fallback=6532)))
@@ -1112,7 +1171,7 @@ def admin_auth():
             429,
         )
 
-    if hmac.compare_digest(password, admin_password):
+    if verify_admin_password(password):
         # Success: clear counters for this session and IP
         session_failed_attempts[session_id] = 0
         if session_id in session_blocked_until:
