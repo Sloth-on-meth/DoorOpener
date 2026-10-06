@@ -249,6 +249,9 @@ session_failed_attempts = defaultdict(int)
 session_blocked_until = defaultdict(lambda: None)
 global_failed_attempts = 0
 global_last_reset = get_current_time()
+# Consecutive blocks per client key, used for exponential backoff (reset on a successful auth).
+block_strikes = defaultdict(int)
+MAX_BLOCK_TIME = timedelta(hours=24)
 
 # Per-client last-seen times (monotonic seconds) so idle rate-limit state can be
 # evicted. Without this, the dicts above grow unbounded as distinct IPs/sessions
@@ -363,6 +366,7 @@ def _cleanup_rate_limit_state():
         session_failed_attempts.pop(k, None)
         ip_blocked_until.pop(k, None)
         session_blocked_until.pop(k, None)
+        block_strikes.pop(k, None)
 
     # Always drop already-expired block timestamps, even for recently-seen keys.
     for blocked in (ip_blocked_until, session_blocked_until):
@@ -414,17 +418,58 @@ def add_security_headers(response):
     return response
 
 
-def check_global_rate_limit():
-    """Check global rate limiting across all requests"""
-    global global_failed_attempts, global_last_reset
-    now = get_current_time()
+def _notify_admin(title, body):
+    """Best-effort Pushbullet alert to the admin. Never raises."""
+    if not pushbullet_token:
+        return
+    try:
+        requests.post(
+            "https://api.pushbullet.com/v2/pushes",
+            headers={"Access-Token": pushbullet_token, "Content-Type": "application/json"},
+            json={"type": "note", "title": title, "body": body},
+            timeout=8,
+        )
+    except requests.RequestException as e:
+        logger.error(f"Pushbullet alert failed: {e}")
 
-    # Reset global counter every hour
+
+def record_global_failure(primary_ip=None, session_id=None, now=None):
+    """Count one failed attempt toward the global hourly total.
+
+    Crossing MAX_GLOBAL_ATTEMPTS_PER_HOUR raises an alert (audit log + Pushbullet, once per
+    window) but deliberately does NOT lock out valid PINs: client IPs are the only thing we can
+    key on, so a hard global cutoff would let anyone with 50 junk guesses deny the door to every
+    legitimate user for the rest of the hour. Per-IP exponential backoff does the throttling.
+    """
+    global global_failed_attempts, global_last_reset
+    now = now or get_current_time()
     if now - global_last_reset > timedelta(hours=1):
         global_failed_attempts = 0
         global_last_reset = now
+    global_failed_attempts += 1
+    if global_failed_attempts == MAX_GLOBAL_ATTEMPTS_PER_HOUR:
+        log_attempt(
+            "GLOBAL_THRESHOLD",
+            f"{MAX_GLOBAL_ATTEMPTS_PER_HOUR} failed attempts this hour across all clients",
+            primary_ip=primary_ip,
+            session_id=session_id,
+            now=now,
+        )
+        _notify_admin(
+            "DoorOpener: possible brute force",
+            f"{MAX_GLOBAL_ATTEMPTS_PER_HOUR} failed PIN attempts in the last hour (latest from {primary_ip}).",
+        )
 
-    return global_failed_attempts < MAX_GLOBAL_ATTEMPTS_PER_HOUR
+
+def next_block_duration(key):
+    """Block length for `key`: BLOCK_TIME doubled per previous consecutive block, capped at 24h."""
+    strikes = block_strikes[key]
+    block_strikes[key] = strikes + 1
+    return min(BLOCK_TIME * (2 ** min(strikes, 10)), MAX_BLOCK_TIME)
+
+
+def _minutes(delta):
+    return max(1, int(delta.total_seconds() // 60))
 
 
 def is_request_suspicious():
@@ -657,7 +702,6 @@ def open_door():
     try:
         primary_ip, session_id, identifier = get_client_identifier()
         now = get_current_time()
-        global global_failed_attempts
 
         # Check for suspicious requests first
         if is_request_suspicious():
@@ -665,16 +709,6 @@ def open_door():
                 "SUSPICIOUS", "Suspicious request detected", primary_ip=primary_ip, session_id=session_id, now=now
             )
             return jsonify({"status": "error", "message": "Request blocked"}), 403
-
-        # Check global rate limit
-        if not check_global_rate_limit():
-            log_attempt(
-                "GLOBAL_BLOCKED", "Global rate limit exceeded", primary_ip=primary_ip, session_id=session_id, now=now
-            )
-            return (
-                jsonify({"status": "error", "message": "Service temporarily unavailable"}),
-                429,
-            )
 
         # Enforce session-based blocking stored in signed cookie (persists across workers)
         sess_block_ts = session.get("blocked_until_ts")
@@ -779,6 +813,8 @@ def open_door():
             # Reset failed attempts upon authorized OIDC use (no active block reached here)
             ip_failed_attempts[identifier] = 0
             session_failed_attempts[session_id] = 0
+            block_strikes.pop(identifier, None)
+            block_strikes.pop(session_id, None)
             if identifier in ip_blocked_until:
                 del ip_blocked_until[identifier]
             if session_id in session_blocked_until:
@@ -797,7 +833,7 @@ def open_door():
             # Increment all counters on invalid input
             ip_failed_attempts[identifier] += 1
             session_failed_attempts[session_id] += 1
-            global_failed_attempts += 1
+            record_global_failure(primary_ip, session_id, now)
 
             reason = "Invalid PIN format"  # Error message
             log_attempt("INVALID_FORMAT", reason, primary_ip=primary_ip, session_id=session_id, now=now)
@@ -821,6 +857,8 @@ def open_door():
             # Reset failed attempts on successful auth (no active block reached here)
             ip_failed_attempts[identifier] = 0
             session_failed_attempts[session_id] = 0
+            block_strikes.pop(identifier, None)
+            block_strikes.pop(session_id, None)
             if identifier in ip_blocked_until:
                 del ip_blocked_until[identifier]
             if session_id in session_blocked_until:
@@ -853,17 +891,19 @@ def open_door():
             # Failed authentication - increment all counters
             ip_failed_attempts[identifier] += 1
             session_failed_attempts[session_id] += 1
-            global_failed_attempts += 1
+            record_global_failure(primary_ip, session_id, now)
 
             # Check session-based blocking first (harder to bypass)
             if session_failed_attempts[session_id] >= SESSION_MAX_ATTEMPTS:
-                session_blocked_until[session_id] = now + BLOCK_TIME
+                duration = next_block_duration(session_id)
+                session_blocked_until[session_id] = now + duration
                 # Also persist in signed session cookie so block applies across workers
-                session["blocked_until_ts"] = (get_current_time() + BLOCK_TIME).timestamp()
-                reason = f"Invalid PIN. Session blocked for {int(BLOCK_TIME.total_seconds() // 60)} minutes"
+                session["blocked_until_ts"] = (get_current_time() + duration).timestamp()
+                reason = f"Invalid PIN. Session blocked for {_minutes(duration)} minutes"
             elif ip_failed_attempts[identifier] >= MAX_ATTEMPTS:
-                ip_blocked_until[identifier] = now + BLOCK_TIME
-                reason = f"Invalid PIN. Access blocked for {int(BLOCK_TIME.total_seconds() // 60)} minutes"
+                duration = next_block_duration(identifier)
+                ip_blocked_until[identifier] = now + duration
+                reason = f"Invalid PIN. Access blocked for {_minutes(duration)} minutes"
             else:
                 reason = "Invalid PIN"
 
@@ -1118,6 +1158,8 @@ def admin_auth():
         if session_id in session_blocked_until:
             del session_blocked_until[session_id]
         ip_failed_attempts[primary_ip] = 0
+        block_strikes.pop(session_id, None)
+        block_strikes.pop(primary_ip, None)
         if primary_ip in ip_blocked_until:
             del ip_blocked_until[primary_ip]
 
@@ -1154,11 +1196,13 @@ def admin_auth():
 
         # Block session after SESSION_MAX_ATTEMPTS failures
         if session_failed_attempts[session_id] >= SESSION_MAX_ATTEMPTS:
-            session_blocked_until[session_id] = now + BLOCK_TIME
-            details = f"Invalid admin password. Session blocked for {int(BLOCK_TIME.total_seconds() // 60)} minutes"
+            duration = next_block_duration(session_id)
+            session_blocked_until[session_id] = now + duration
+            details = f"Invalid admin password. Session blocked for {_minutes(duration)} minutes"
         elif ip_failed_attempts[primary_ip] >= SESSION_MAX_ATTEMPTS:
-            ip_blocked_until[primary_ip] = now + BLOCK_TIME
-            details = f"Invalid admin password. IP blocked for {int(BLOCK_TIME.total_seconds() // 60)} minutes"
+            duration = next_block_duration(primary_ip)
+            ip_blocked_until[primary_ip] = now + duration
+            details = f"Invalid admin password. IP blocked for {_minutes(duration)} minutes"
         else:
             details = "Invalid admin password"
 
