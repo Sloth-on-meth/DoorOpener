@@ -54,8 +54,14 @@ def test_login_does_not_revive_disabled_config_user_when_store_corrupt(client, t
     store.create_user("off", "1111", active=False)
     monkeypatch.setattr(app_module, "users_store", store)
     monkeypatch.setattr(app_module, "user_pins", {"off": "1111", "on": "2222"})
+    monkeypatch.setattr(app_module, "get_client_identifier", lambda: ("192.0.2.1", "corrupt-session", "corrupt-ip"))
 
     assert client.post("/open-door", json={"pin": "2222"}, headers=HEADERS).status_code == 200
     path.write_text("{corrupt")
     assert client.post("/open-door", json={"pin": "2222"}, headers=HEADERS).status_code == 200
-    assert client.post("/open-door", json={"pin": "1111"}, headers=HEADERS).status_code == 401
+    response = client.post("/open-door", json={"pin": "1111"}, headers=HEADERS)
+    assert response.status_code == 401
+    # an unreadable store must not let the wrong-PIN path skip the failure counters
+    assert app_module.ip_failed_attempts["corrupt-ip"] == 1
+    assert app_module.session_failed_attempts["corrupt-session"] == 1
+    assert app_module.global_failed_attempts == 1
