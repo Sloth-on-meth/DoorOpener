@@ -1,3 +1,21 @@
+## [Unreleased]
+
+### 🔐 Security & Hardening
+- **Rate limits can no longer be reset by varying request headers** — the throttling identifier was `ip + hash(User-Agent + Accept-Language)`, so changing a header minted a fresh failure counter. It is now the client IP only.
+- **Trusted proxy count is configurable** — `ProxyFix` always trusted one `X-Forwarded-For` hop, so anyone reaching the port directly could forge their IP. New `DOOROPENER_TRUSTED_PROXIES` / `[server] trusted_proxies` (default 1; `0` for direct access). `docker-compose.yml` now publishes the port on `127.0.0.1` by default (`DOOROPENER_BIND` to change). **Upgrade note:** if you reach the container directly from another host, set `DOOROPENER_BIND=0.0.0.0` and `DOOROPENER_TRUSTED_PROXIES=0`.
+- **Global failure limit no longer locks out valid PINs** — 50 junk guesses used to deny the door to everyone for an hour. Crossing the threshold now writes a `GLOBAL_THRESHOLD` audit entry and sends a Pushbullet alert (once per window). Throttling is per-IP with exponential backoff: each consecutive block doubles (capped at 24h), reset on a successful login. Applies to the keypad and admin login.
+- **Disabled-account PINs are no longer a free oracle** — they used to return a distinct 403 without counting as a failure, confirming which PINs belong to real accounts. They now count and respond exactly like any wrong PIN; the audit log still records `DISABLED_USER` with the account.
+- **Refuses to start with a placeholder secret key or default admin password** — `FLASK_SECRET_KEY`/`secret_key` must be 16+ chars and not an example value; `admin_password` must not be a known default. `admin_password` may now be a werkzeug hash. Escape hatch for local dev: `DOOROPENER_ALLOW_INSECURE_DEFAULTS=true`.
+- **`users.json` access is serialised** — a lock around every load-modify-save stops a concurrent `touch_user` from writing back a stale snapshot and undoing an admin edit (e.g. re-enabling a just-disabled user).
+- **Unreadable `users.json` no longer re-enables disabled users** — the fallback used config.ini PINs wholesale. It now excludes users known-disabled from the last good load, and fails closed if there is none.
+- **Service worker no longer caches `/admin/*`, `/auth/status` or `/battery`** — only the shell and `/static/` are cached; cache version bumped so old entries are purged.
+
+### 🐛 Bug Fixes
+- **Audit log silently stopped after "Clear test entries"** — the file was replaced while the log handler kept writing to the old inode. The handler stream is now reopened after the swap. `/admin/logs` also honours `DOOROPENER_LOG_DIR`.
+- **Non-ASCII digits caused a 500** — `str.isdigit()` accepts e.g. Arabic-Indic digits, which `hmac.compare_digest` rejects with `TypeError`. PINs must now be ASCII digits; comparisons are done on bytes so a non-ASCII admin password or config PIN gives a clean failure instead of breaking logins.
+- **`%` in config values** — `ConfigParser` interpolation made `config.set()` raise (e.g. a notice of "50% off"). Interpolation is now disabled.
+- **`config.ini` is written atomically** — previously truncated and rewritten in place, so a crash could corrupt the file holding the HA token. Shared helper `atomic_io.atomic_write_text` (also used by the users store) handles bind-mounted files and read-only directories.
+
 ## v[1.14.1] - 2026-07-08
 
 ### 🐛 Bug Fixes

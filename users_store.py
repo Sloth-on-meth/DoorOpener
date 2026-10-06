@@ -1,10 +1,12 @@
+import functools
 import hmac
 import json
 import os
-import shutil
-import tempfile
+import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+
+from atomic_io import atomic_write_text
 
 ISO_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 
@@ -15,6 +17,33 @@ class UsersStoreError(RuntimeError):
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def is_valid_pin(pin: Any) -> bool:
+    """4-8 ASCII digits. str.isdigit() alone also accepts Unicode digits (e.g. Arabic-Indic),
+    which hmac.compare_digest cannot compare."""
+    return isinstance(pin, str) and pin.isascii() and pin.isdigit() and 4 <= len(pin) <= 8
+
+
+def pins_equal(a: str, b: str) -> bool:
+    """Constant-time PIN comparison that tolerates non-ASCII input instead of raising TypeError."""
+    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+
+
+def _locked(method):
+    """Serialise a public method on the store's lock.
+
+    Every operation is load -> mutate -> save on shared instance state, and gunicorn runs
+    several threads. Without this, a touch_user() racing an admin edit can write back a stale
+    snapshot and silently undo it (e.g. re-activate a user who was just disabled).
+    """
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
 
 
 class UsersStore:
@@ -34,6 +63,9 @@ class UsersStore:
     def __init__(self, path: str):
         self.path = path
         self.data: Dict[str, Any] = {"users": {}}
+        self._lock = threading.RLock()
+        # Usernames disabled in the last successfully-loaded snapshot (None = never loaded).
+        self._last_inactive: Optional[set] = None
 
     def _load_file(self) -> None:
         if not os.path.exists(self.path):
@@ -64,66 +96,15 @@ class UsersStore:
         self.data = data
 
     def _save_atomic(self) -> None:
-        dir_path = os.path.dirname(self.path)
-        os.makedirs(dir_path, exist_ok=True)
-        # Prefer writing the temp file next to the target (same filesystem = atomic
-        # rename). Fall back to /tmp when the app directory can't take a new file,
-        # e.g. when users.json is a single-file Docker bind-mount, or the primary
-        # filesystem is out of space/inodes.
-        tmp_path = None
-        for tmp_dir in (dir_path, tempfile.gettempdir()):
-            try:
-                fd, tmp_path = tempfile.mkstemp(dir=tmp_dir, suffix=".tmp")
-                break
-            except OSError:
-                continue
-        else:
-            raise UsersStoreError(f"Cannot create temp file in {dir_path} or {tempfile.gettempdir()}")
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(self.data, f, ensure_ascii=False, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            try:
-                # Same filesystem: atomic rename, no window where the file is
-                # missing or half-written.
-                os.replace(tmp_path, self.path)
-            except OSError:
-                # Cross-device: os.replace() can't atomically rename here, so
-                # back up the existing file before overwriting it. If the copy
-                # below fails partway (disk fills up, process killed), restore
-                # from the backup instead of leaving users.json truncated.
-                backup_path = self.path + ".bak"
-                has_existing = os.path.exists(self.path)
-                if has_existing:
-                    shutil.copy2(self.path, backup_path)
-                try:
-                    with open(tmp_path, "r", encoding="utf-8") as src:
-                        content = src.read()
-                    with open(self.path, "w", encoding="utf-8") as dst:
-                        dst.write(content)
-                        dst.flush()
-                        os.fsync(dst.fileno())
-                except Exception:
-                    if has_existing:
-                        shutil.copy2(backup_path, self.path)
-                    raise
-                finally:
-                    if has_existing:
-                        try:
-                            os.remove(backup_path)
-                        except OSError:
-                            pass
-                os.remove(tmp_path)
-        except Exception:
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-            raise
+            atomic_write_text(self.path, json.dumps(self.data, ensure_ascii=False, indent=2))
+        except OSError as e:
+            raise UsersStoreError(f"Cannot write users store at {self.path}: {e}") from e
 
+    @_locked
     def effective_pins(self, base_pins: Dict[str, str]) -> Dict[str, str]:
         self._load_file()
+        self._last_inactive = {u for u, m in self.data["users"].items() if not bool(m.get("active", True))}
         effective: Dict[str, str] = {}
         # Start with base pins (implicitly active)
         for user, pin in (base_pins or {}).items():
@@ -137,10 +118,23 @@ class UsersStore:
                     del effective[user]
                 continue
             pin = meta.get("pin")
-            if isinstance(pin, str) and 4 <= len(pin) <= 8 and pin.isdigit():
+            if is_valid_pin(pin):
                 effective[user] = pin
         return effective
 
+    @_locked
+    def degraded_pins(self, base_pins: Dict[str, str]) -> Dict[str, str]:
+        """PINs to honour when the store file can't be read.
+
+        Falling back to config.ini alone would silently re-enable anyone disabled in the store.
+        So: drop every user known to be disabled from the last good snapshot, and if there is no
+        snapshot (store unreadable since startup) fail closed rather than guess.
+        """
+        if self._last_inactive is None:
+            return {}
+        return {u: p for u, p in (base_pins or {}).items() if u not in self._last_inactive}
+
+    @_locked
     def list_users(self, include_pins: bool = False) -> Dict[str, Any]:
         self._load_file()
         items = []
@@ -170,8 +164,9 @@ class UsersStore:
 
     @staticmethod
     def _validate_pin(pin: str) -> bool:
-        return isinstance(pin, str) and pin.isdigit() and 4 <= len(pin) <= 8
+        return is_valid_pin(pin)
 
+    @_locked
     def create_user(self, username: str, pin: str, active: bool = True) -> None:
         self._ensure_loaded()
         if not self._validate_username(username):
@@ -191,6 +186,7 @@ class UsersStore:
         }
         self._save_atomic()
 
+    @_locked
     def update_user(self, username: str, pin: Optional[str] = None, active: Optional[bool] = None) -> None:
         self._ensure_loaded()
         if username not in self.data["users"]:
@@ -207,6 +203,7 @@ class UsersStore:
         meta["updated_at"] = _now_iso()
         self._save_atomic()
 
+    @_locked
     def delete_user(self, username: str) -> None:
         self._ensure_loaded()
         if username not in self.data["users"]:
@@ -214,6 +211,7 @@ class UsersStore:
         del self.data["users"][username]
         self._save_atomic()
 
+    @_locked
     def touch_user(self, username: str) -> None:
         self._ensure_loaded()
         if username in self.data["users"]:
@@ -222,20 +220,23 @@ class UsersStore:
             self.data["users"][username]["times_used"] = self.data["users"][username].get("times_used", 0) + 1
             self._save_atomic()
 
+    @_locked
     def user_exists(self, username: str) -> bool:
         self._ensure_loaded()
         return username in self.data["users"]
 
+    @_locked
     def find_disabled_user_by_pin(self, pin: str) -> Optional[str]:
         """Return the username of an inactive user whose PIN matches, or None."""
         self._ensure_loaded()
         for username, meta in self.data["users"].items():
             if not bool(meta.get("active", True)):
                 stored_pin = meta.get("pin", "")
-                if isinstance(stored_pin, str) and hmac.compare_digest(pin, stored_pin):
+                if isinstance(stored_pin, str) and pins_equal(pin, stored_pin):
                     return username
         return None
 
+    @_locked
     def pin_exists(self, pin: str, exclude_username: Optional[str] = None) -> bool:
         """Return True if the PIN is already assigned to any store user (excluding one username)."""
         self._ensure_loaded()

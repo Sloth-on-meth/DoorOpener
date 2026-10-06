@@ -19,12 +19,18 @@ bob = 5678
 charlie = 9012
 
 [admin]
-admin_password = admin123
+# REQUIRED: the app refuses to start with well-known defaults. May be plaintext or a hash:
+#   python -c "from werkzeug.security import generate_password_hash as g; print(g('your password'))"
+admin_password = change-me-to-a-real-password
 
 [server]
 # Port for the web server (default: 6532)
 # Can be overridden by DOOROPENER_PORT environment variable
 port = 6532
+
+# Reverse proxies in front of the app whose X-Forwarded-For is trusted (0 = direct access).
+# Can be overridden by DOOROPENER_TRUSTED_PROXIES.
+trusted_proxies = 1
 
 # Test mode - when true, shows success message but doesn't actually open door
 test_mode = false

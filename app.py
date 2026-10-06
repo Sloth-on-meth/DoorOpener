@@ -7,6 +7,7 @@ enhanced multi-layer security, timezone support, and comprehensive brute force p
 """
 
 import hmac
+import io
 import json
 import logging
 import os
@@ -36,8 +37,10 @@ from flask import (
     url_for,
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import check_password_hash
 
-from users_store import UsersStore
+from atomic_io import atomic_write_text
+from users_store import UsersStore, is_valid_pin, pins_equal
 
 try:
     from authlib.integrations.flask_client import OAuth
@@ -97,10 +100,47 @@ attempt_logger.handlers = [_attempt_handler]
 
 # --- Flask App Setup ---
 app = Flask(__name__)
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+# Values that must never be used as a signing key: anything in a public repo or example file
+# lets an attacker forge session cookies (including admin_authenticated=True).
+MIN_SECRET_KEY_LENGTH = 16
+_PLACEHOLDER_SECRETS = {
+    "your-secret-key-here",
+    "change-me-to-something-long-and-random",
+    "changeme",
+    "change-me",
+    "secret",
+    "secret_key",
+    "dev",
+    "test",
+}
+_PLACEHOLDER_ADMIN_PASSWORDS = {
+    "admin123",
+    "admin",
+    "password",
+    "changeme",
+    "change-me",
+    "change-me-to-a-real-password",
+    "your_admin_password",
+    "",
+}
+_ALLOW_INSECURE = os.environ.get("DOOROPENER_ALLOW_INSECURE_DEFAULTS", "").lower() == "true"
+
+
+def _reject_weak_secret(value: str, source: str) -> None:
+    if _ALLOW_INSECURE:
+        return
+    if value.strip().lower() in _PLACEHOLDER_SECRETS or len(value) < MIN_SECRET_KEY_LENGTH:
+        raise RuntimeError(
+            f"Refusing to start: {source} is a placeholder or shorter than {MIN_SECRET_KEY_LENGTH} characters, "
+            "so session cookies could be forged. Generate one with: "
+            'python -c "import secrets; print(secrets.token_hex(32))"'
+        )
+
+
 # Prefer fixed secret from environment; fallback to temporary random (will be overridden by config.ini later if present)
 _env_secret = os.environ.get("FLASK_SECRET_KEY")
 if _env_secret:
+    _reject_weak_secret(_env_secret, "FLASK_SECRET_KEY")
     app.secret_key = _env_secret
     app.config["RANDOM_SECRET_WARNING"] = False
 else:
@@ -118,18 +158,22 @@ app.config.update(
 )
 
 # --- Configuration ---
-config = ConfigParser()
+# interpolation=None: '%' is a legal character in passwords/notices; with the default
+# interpolation it makes config.set()/get() raise.
+config = ConfigParser(interpolation=None)
 config_path = os.path.join(os.path.dirname(__file__), "config.ini")
 config.read(config_path)
 
 
 def save_config() -> None:
-    """Persist the current in-memory config to disk directly.
+    """Persist the current in-memory config to disk without risking a truncated file.
 
+    config.ini holds the HA token and admin password, so a crash mid-write must not corrupt it.
     Note: If config.ini is mounted read-only, this will raise a PermissionError or OSError.
     """
-    with open(config_path, "w", encoding="utf-8") as f:
-        config.write(f)
+    buf = io.StringIO()
+    config.write(buf)
+    atomic_write_text(config_path, buf.getvalue())
 
 
 # If no env secret key was provided, allow overriding the temporary random with config.ini
@@ -137,6 +181,7 @@ if not _env_secret:
     try:
         _cfg_secret = config.get("server", "secret_key", fallback=None)
         if _cfg_secret:
+            _reject_weak_secret(_cfg_secret, "[server] secret_key")
             app.secret_key = _cfg_secret
             app.config["RANDOM_SECRET_WARNING"] = False
         elif app.config.get("RANDOM_SECRET_WARNING"):
@@ -144,6 +189,8 @@ if not _env_secret:
                 "FLASK_SECRET_KEY not set and no [server] secret_key in config.ini; "
                 "sessions may become invalid across restarts or multiple workers."
             )
+    except RuntimeError:
+        raise
     except Exception as e:  # nosec B110 - logging warning is best-effort; failure is non-critical
         logging.getLogger("dooropener").warning(f"Could not read secret_key from config.ini: {e}")
 
@@ -160,7 +207,9 @@ def get_effective_user_pins() -> dict:
     try:
         return users_store.effective_pins(user_pins)
     except Exception:
-        return dict(user_pins)
+        # Don't just fall back to config.ini: that would re-enable users disabled in the store.
+        logger.exception("Users store unreadable; using degraded PIN set (known-disabled users excluded)")
+        return users_store.degraded_pins(user_pins)
 
 
 # Admin Configuration
@@ -169,10 +218,37 @@ if not admin_password:
     raise RuntimeError(
         "No admin password configured. Set [admin] admin_password in config.ini or ensure the config file exists."
     )
+if admin_password.strip().lower() in _PLACEHOLDER_ADMIN_PASSWORDS and not _ALLOW_INSECURE:
+    raise RuntimeError(
+        "Refusing to start: [admin] admin_password is still a well-known default. Set a real password "
+        "(or a hash: python -c \"from werkzeug.security import generate_password_hash as g; print(g('...'))\")."
+    )
+_HASH_PREFIXES = ("scrypt:", "pbkdf2:")
+
+
+def verify_admin_password(candidate: str) -> bool:
+    """Check a login attempt against admin_password, which may be plaintext or a werkzeug hash.
+
+    Plaintext is compared as bytes: hmac.compare_digest raises TypeError on non-ASCII str.
+    """
+    if admin_password.startswith(_HASH_PREFIXES):
+        return check_password_hash(admin_password, candidate)
+    return hmac.compare_digest(candidate.encode("utf-8"), admin_password.encode("utf-8"))
+
 
 # Server Configuration
 server_port = int(os.environ.get("DOOROPENER_PORT", config.getint("server", "port", fallback=6532)))
 test_mode = config.getboolean("server", "test_mode", fallback=False)
+
+# Number of reverse proxies in front of the app whose X-Forwarded-* headers we trust. Every rate
+# limit keys on the client IP, so trusting more hops than actually exist lets any caller who can
+# reach the port directly pick their own IP via a forged X-Forwarded-For. 0 = no proxy (use the
+# socket address). Default 1 matches a single reverse proxy such as Traefik/nginx/Caddy.
+TRUSTED_PROXIES = int(
+    os.environ.get("DOOROPENER_TRUSTED_PROXIES", config.getint("server", "trusted_proxies", fallback=1))
+)
+if TRUSTED_PROXIES > 0:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=TRUSTED_PROXIES, x_proto=TRUSTED_PROXIES, x_host=TRUSTED_PROXIES)
 if test_mode:
     logging.getLogger("dooropener").warning(
         "TEST MODE ENABLED — the door will NOT open. "
@@ -249,6 +325,9 @@ session_failed_attempts = defaultdict(int)
 session_blocked_until = defaultdict(lambda: None)
 global_failed_attempts = 0
 global_last_reset = get_current_time()
+# Consecutive blocks per client key, used for exponential backoff (reset on a successful auth).
+block_strikes = defaultdict(int)
+MAX_BLOCK_TIME = timedelta(hours=24)
 
 # Per-client last-seen times (monotonic seconds) so idle rate-limit state can be
 # evicted. Without this, the dicts above grow unbounded as distinct IPs/sessions
@@ -314,7 +393,8 @@ def manifest_file():
 
 def get_client_identifier():
     """Get client identifier using multiple factors for better security"""
-    # Use request.remote_addr as primary (can't be spoofed easily)
+    # request.remote_addr is the only attacker-independent factor (given a correct
+    # TRUSTED_PROXIES setting); everything else a client sends can be varied per request.
     primary_ip = request.remote_addr
 
     # Create session-based identifier if available
@@ -323,12 +403,9 @@ def get_client_identifier():
         session_id = secrets.token_hex(16)
         session["_session_id"] = session_id
 
-    # Combine multiple factors for identifier
-    user_agent = request.headers.get("User-Agent", "")[:100]  # Limit length
-    accept_lang = request.headers.get("Accept-Language", "")[:50]
-
-    # Create composite identifier (harder to spoof than just IP)
-    identifier = f"{primary_ip}:{hash(user_agent + accept_lang) % 10000}"
+    # The throttling identifier must NOT include client-controlled headers (User-Agent,
+    # Accept-Language): rotating them would hand an attacker a fresh failure counter per request.
+    identifier = primary_ip
 
     # Record activity so idle rate-limit state for these keys can be evicted later.
     now_mono = time.monotonic()
@@ -363,6 +440,7 @@ def _cleanup_rate_limit_state():
         session_failed_attempts.pop(k, None)
         ip_blocked_until.pop(k, None)
         session_blocked_until.pop(k, None)
+        block_strikes.pop(k, None)
 
     # Always drop already-expired block timestamps, even for recently-seen keys.
     for blocked in (ip_blocked_until, session_blocked_until):
@@ -414,17 +492,58 @@ def add_security_headers(response):
     return response
 
 
-def check_global_rate_limit():
-    """Check global rate limiting across all requests"""
-    global global_failed_attempts, global_last_reset
-    now = get_current_time()
+def _notify_admin(title, body):
+    """Best-effort Pushbullet alert to the admin. Never raises."""
+    if not pushbullet_token:
+        return
+    try:
+        requests.post(
+            "https://api.pushbullet.com/v2/pushes",
+            headers={"Access-Token": pushbullet_token, "Content-Type": "application/json"},
+            json={"type": "note", "title": title, "body": body},
+            timeout=8,
+        )
+    except requests.RequestException as e:
+        logger.error(f"Pushbullet alert failed: {e}")
 
-    # Reset global counter every hour
+
+def record_global_failure(primary_ip=None, session_id=None, now=None):
+    """Count one failed attempt toward the global hourly total.
+
+    Crossing MAX_GLOBAL_ATTEMPTS_PER_HOUR raises an alert (audit log + Pushbullet, once per
+    window) but deliberately does NOT lock out valid PINs: client IPs are the only thing we can
+    key on, so a hard global cutoff would let anyone with 50 junk guesses deny the door to every
+    legitimate user for the rest of the hour. Per-IP exponential backoff does the throttling.
+    """
+    global global_failed_attempts, global_last_reset
+    now = now or get_current_time()
     if now - global_last_reset > timedelta(hours=1):
         global_failed_attempts = 0
         global_last_reset = now
+    global_failed_attempts += 1
+    if global_failed_attempts == MAX_GLOBAL_ATTEMPTS_PER_HOUR:
+        log_attempt(
+            "GLOBAL_THRESHOLD",
+            f"{MAX_GLOBAL_ATTEMPTS_PER_HOUR} failed attempts this hour across all clients",
+            primary_ip=primary_ip,
+            session_id=session_id,
+            now=now,
+        )
+        _notify_admin(
+            "DoorOpener: possible brute force",
+            f"{MAX_GLOBAL_ATTEMPTS_PER_HOUR} failed PIN attempts in the last hour (latest from {primary_ip}).",
+        )
 
-    return global_failed_attempts < MAX_GLOBAL_ATTEMPTS_PER_HOUR
+
+def next_block_duration(key):
+    """Block length for `key`: BLOCK_TIME doubled per previous consecutive block, capped at 24h."""
+    strikes = block_strikes[key]
+    block_strikes[key] = strikes + 1
+    return min(BLOCK_TIME * (2 ** min(strikes, 10)), MAX_BLOCK_TIME)
+
+
+def _minutes(delta):
+    return max(1, int(delta.total_seconds() // 60))
 
 
 def is_request_suspicious():
@@ -446,7 +565,7 @@ def validate_pin_input(pin):
     try:
         if not isinstance(pin, str):
             raise ValueError("PIN must be a string")
-        if not pin.isdigit() or not (4 <= len(pin) <= 8):
+        if not is_valid_pin(pin):
             return False, None
         return True, pin
     except Exception as e:
@@ -657,7 +776,6 @@ def open_door():
     try:
         primary_ip, session_id, identifier = get_client_identifier()
         now = get_current_time()
-        global global_failed_attempts
 
         # Check for suspicious requests first
         if is_request_suspicious():
@@ -665,16 +783,6 @@ def open_door():
                 "SUSPICIOUS", "Suspicious request detected", primary_ip=primary_ip, session_id=session_id, now=now
             )
             return jsonify({"status": "error", "message": "Request blocked"}), 403
-
-        # Check global rate limit
-        if not check_global_rate_limit():
-            log_attempt(
-                "GLOBAL_BLOCKED", "Global rate limit exceeded", primary_ip=primary_ip, session_id=session_id, now=now
-            )
-            return (
-                jsonify({"status": "error", "message": "Service temporarily unavailable"}),
-                429,
-            )
 
         # Enforce session-based blocking stored in signed cookie (persists across workers)
         sess_block_ts = session.get("blocked_until_ts")
@@ -779,6 +887,8 @@ def open_door():
             # Reset failed attempts upon authorized OIDC use (no active block reached here)
             ip_failed_attempts[identifier] = 0
             session_failed_attempts[session_id] = 0
+            block_strikes.pop(identifier, None)
+            block_strikes.pop(session_id, None)
             if identifier in ip_blocked_until:
                 del ip_blocked_until[identifier]
             if session_id in session_blocked_until:
@@ -797,7 +907,7 @@ def open_door():
             # Increment all counters on invalid input
             ip_failed_attempts[identifier] += 1
             session_failed_attempts[session_id] += 1
-            global_failed_attempts += 1
+            record_global_failure(primary_ip, session_id, now)
 
             reason = "Invalid PIN format"  # Error message
             log_attempt("INVALID_FORMAT", reason, primary_ip=primary_ip, session_id=session_id, now=now)
@@ -808,7 +918,7 @@ def open_door():
 
         # Check PIN against user database (effective set)
         for user, user_pin in get_effective_user_pins().items():
-            if hmac.compare_digest(pin_from_request, user_pin):
+            if pins_equal(pin_from_request, user_pin):
                 matched_user = user
                 break
 
@@ -821,6 +931,8 @@ def open_door():
             # Reset failed attempts on successful auth (no active block reached here)
             ip_failed_attempts[identifier] = 0
             session_failed_attempts[session_id] = 0
+            block_strikes.pop(identifier, None)
+            block_strikes.pop(session_id, None)
             if identifier in ip_blocked_until:
                 del ip_blocked_until[identifier]
             if session_id in session_blocked_until:
@@ -829,45 +941,42 @@ def open_door():
 
             return _send_open_command(matched_user, primary_ip, session_id, now)
         else:
-            # Check if the PIN belongs to a disabled store user before treating as wrong PIN
+            # A PIN belonging to a disabled account is treated exactly like any other wrong PIN
+            # (same counters, same response). Answering differently, or skipping the counters,
+            # would let an attacker probe which PINs belong to real accounts for free. The audit
+            # log still records which account it was.
             disabled_user = users_store.find_disabled_user_by_pin(pin_from_request)
+
+            # Failed authentication - increment all counters
+            ip_failed_attempts[identifier] += 1
+            session_failed_attempts[session_id] += 1
+            record_global_failure(primary_ip, session_id, now)
+
+            # Check session-based blocking first (harder to bypass)
+            if session_failed_attempts[session_id] >= SESSION_MAX_ATTEMPTS:
+                duration = next_block_duration(session_id)
+                session_blocked_until[session_id] = now + duration
+                # Also persist in signed session cookie so block applies across workers
+                session["blocked_until_ts"] = (get_current_time() + duration).timestamp()
+                reason = f"Invalid PIN. Session blocked for {_minutes(duration)} minutes"
+            elif ip_failed_attempts[identifier] >= MAX_ATTEMPTS:
+                duration = next_block_duration(identifier)
+                ip_blocked_until[identifier] = now + duration
+                reason = f"Invalid PIN. Access blocked for {_minutes(duration)} minutes"
+            else:
+                reason = "Invalid PIN"
+
             if disabled_user:
                 log_attempt(
                     "DISABLED_USER",
-                    "Access denied: account disabled",
+                    f"Access denied: account disabled ({reason})",
                     user=disabled_user,
                     primary_ip=primary_ip,
                     session_id=session_id,
                     now=now,
                 )
-                return (
-                    jsonify(
-                        {
-                            "status": "error",
-                            "message": "Your account has been disabled. Contact the administrator.",
-                        }
-                    ),
-                    403,
-                )
-
-            # Failed authentication - increment all counters
-            ip_failed_attempts[identifier] += 1
-            session_failed_attempts[session_id] += 1
-            global_failed_attempts += 1
-
-            # Check session-based blocking first (harder to bypass)
-            if session_failed_attempts[session_id] >= SESSION_MAX_ATTEMPTS:
-                session_blocked_until[session_id] = now + BLOCK_TIME
-                # Also persist in signed session cookie so block applies across workers
-                session["blocked_until_ts"] = (get_current_time() + BLOCK_TIME).timestamp()
-                reason = f"Invalid PIN. Session blocked for {int(BLOCK_TIME.total_seconds() // 60)} minutes"
-            elif ip_failed_attempts[identifier] >= MAX_ATTEMPTS:
-                ip_blocked_until[identifier] = now + BLOCK_TIME
-                reason = f"Invalid PIN. Access blocked for {int(BLOCK_TIME.total_seconds() // 60)} minutes"
             else:
-                reason = "Invalid PIN"
-
-            log_attempt("AUTH_FAILURE", reason, primary_ip=primary_ip, session_id=session_id, now=now)
+                log_attempt("AUTH_FAILURE", reason, primary_ip=primary_ip, session_id=session_id, now=now)
             # Include blocked_until if a block is now active
             resp = {"status": "error", "message": reason}
             if session_blocked_until[session_id] and now < session_blocked_until[session_id]:
@@ -1112,12 +1221,14 @@ def admin_auth():
             429,
         )
 
-    if hmac.compare_digest(password, admin_password):
+    if verify_admin_password(password):
         # Success: clear counters for this session and IP
         session_failed_attempts[session_id] = 0
         if session_id in session_blocked_until:
             del session_blocked_until[session_id]
         ip_failed_attempts[primary_ip] = 0
+        block_strikes.pop(session_id, None)
+        block_strikes.pop(primary_ip, None)
         if primary_ip in ip_blocked_until:
             del ip_blocked_until[primary_ip]
 
@@ -1154,11 +1265,13 @@ def admin_auth():
 
         # Block session after SESSION_MAX_ATTEMPTS failures
         if session_failed_attempts[session_id] >= SESSION_MAX_ATTEMPTS:
-            session_blocked_until[session_id] = now + BLOCK_TIME
-            details = f"Invalid admin password. Session blocked for {int(BLOCK_TIME.total_seconds() // 60)} minutes"
+            duration = next_block_duration(session_id)
+            session_blocked_until[session_id] = now + duration
+            details = f"Invalid admin password. Session blocked for {_minutes(duration)} minutes"
         elif ip_failed_attempts[primary_ip] >= SESSION_MAX_ATTEMPTS:
-            ip_blocked_until[primary_ip] = now + BLOCK_TIME
-            details = f"Invalid admin password. IP blocked for {int(BLOCK_TIME.total_seconds() // 60)} minutes"
+            duration = next_block_duration(primary_ip)
+            ip_blocked_until[primary_ip] = now + duration
+            details = f"Invalid admin password. IP blocked for {_minutes(duration)} minutes"
         else:
             details = "Invalid admin password"
 
@@ -1412,7 +1525,6 @@ def admin_logs():
 
     try:
         logs = []
-        log_path = os.path.join(os.path.dirname(__file__), "logs", "log.txt")
 
         if os.path.exists(log_path):
             try:
@@ -1489,13 +1601,17 @@ def admin_logs_clear():
         removed = 0
         kept = 0
         if mode == "all":
-            # Truncate file
+            # Truncate in place under the handler lock. The handler's stream is O_APPEND, so its
+            # next write lands at the new end of file.
+            _attempt_handler.acquire()
             try:
                 with open(log_path, "w", encoding="utf-8"):
                     pass
             except FileNotFoundError:
                 # Nothing to clear
                 pass
+            finally:
+                _attempt_handler.release()
         elif mode == "test_only":
             # Filter out lines that look like TEST MODE entries
             lines = []
@@ -1522,18 +1638,17 @@ def admin_logs_clear():
                     filtered.append(line)
             kept = len(filtered)
 
-            # Atomic write
-            fd, tmp_path = tempfile.mkstemp(prefix="log.", suffix=".txt", dir=os.path.dirname(log_path) or None)
+            # Swap the file while holding the handler lock, then drop the handler's open stream.
+            # Without that, the handler keeps writing to the old (now unlinked) inode and every
+            # later audit entry silently disappears. The next emit() reopens log_path.
+            _attempt_handler.acquire()
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as tmp:
-                    tmp.writelines(filtered)
-                os.replace(tmp_path, log_path)
+                atomic_write_text(log_path, "".join(filtered))
+                if _attempt_handler.stream:
+                    _attempt_handler.stream.close()
+                    _attempt_handler.stream = None
             finally:
-                try:
-                    if os.path.exists(tmp_path):
-                        os.remove(tmp_path)
-                except Exception:
-                    logger.exception(f"Failed to remove temporary log file temp_path={tmp_path}")
+                _attempt_handler.release()
         else:
             return jsonify({"error": "Invalid mode"}), 400
 
@@ -1742,14 +1857,14 @@ def admin_users_migrate(username: str):
     body = request.get_json(silent=True) or {}
     new_pin = body.get("pin")
     if new_pin is not None:
-        if not isinstance(new_pin, str) or not new_pin.isdigit() or not (4 <= len(new_pin) <= 8):
+        if not is_valid_pin(new_pin):
             return jsonify({"error": "PIN must be 4-8 digits"}), 400
         pin_to_use = new_pin
     else:
         pin_to_use = existing_pin
 
     # Validate PIN format
-    if not isinstance(pin_to_use, str) or not pin_to_use.isdigit() or not (4 <= len(pin_to_use) <= 8):
+    if not is_valid_pin(pin_to_use):
         return jsonify({"error": "PIN must be 4-8 digits"}), 400
 
     # Create user in JSON store
@@ -1808,7 +1923,7 @@ def admin_users_migrate_all():
             failed.append({"username": username, "error": "invalid_pin"})
             continue
         # Validate format
-        if not (existing_pin.isdigit() and 4 <= len(existing_pin) <= 8):
+        if not is_valid_pin(existing_pin):
             failed.append({"username": username, "error": "invalid_format"})
             continue
         # Skip if user already exists in JSON store

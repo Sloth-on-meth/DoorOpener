@@ -1,5 +1,5 @@
 /* DoorOpener Service Worker */
-const CACHE_VERSION = 'v2'; // bump on every deploy to bust stale caches
+const CACHE_VERSION = 'v3'; // bump on every deploy to bust stale caches
 const CACHE_NAME = `dooropener-cache-${CACHE_VERSION}`;
 const ASSETS = [
   '/',
@@ -56,12 +56,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Default: network-first with cache fallback
-  event.respondWith(
-    fetch(req).then((res) => {
-      const resClone = res.clone();
-      caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone));
-      return res;
-    }).catch(() => caches.match(req))
-  );
+  // Everything else (/admin/*, /auth/status, /battery, ...) goes straight to the network and is
+  // never cached: those responses hold user lists, audit logs and auth state that must not
+  // persist in Cache Storage or be replayed offline after logout.
+  return;
 });
