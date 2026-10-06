@@ -82,3 +82,70 @@ def test_save_config_uses_atomic_writer(tmp_path, monkeypatch):
     app_module.save_config()
     assert "notice = hello" in path.read_text()
     assert os.listdir(tmp_path) == ["config.ini"]
+
+
+def test_backup_goes_beside_temp_file_when_target_dir_is_not_writable(tmp_path):
+    """Docker case: /app read-only, config.ini a single-file bind mount (os.replace fails)."""
+    import tempfile as real_tempfile
+
+    target_dir = tmp_path / "ro"
+    target_dir.mkdir()
+    target = target_dir / "config.ini"
+    target.write_text("old")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    real_mkstemp = real_tempfile.mkstemp
+
+    def mkstemp(dir=None, **kw):
+        if dir == str(target_dir):
+            raise PermissionError("read-only dir")
+        return real_mkstemp(dir=str(scratch), **kw)
+
+    real_copy2 = __import__("shutil").copy2
+    copy_targets = []
+
+    def copy2(src, dst, **kw):
+        copy_targets.append(str(dst))
+        return real_copy2(src, dst, **kw)
+
+    with (
+        patch("atomic_io.tempfile.mkstemp", mkstemp),
+        patch("atomic_io.os.replace", side_effect=OSError("busy")),
+        patch("atomic_io.shutil.copy2", copy2),
+    ):
+        atomic_write_text(str(target), "new")
+    assert target.read_text() == "new"
+    # (the test runs as root so we can't truly make the dir read-only; assert where the backup went)
+    assert copy_targets and all(not t.startswith(str(target_dir)) for t in copy_targets)
+    assert [p.name for p in target_dir.iterdir()] == ["config.ini"]
+    assert list(scratch.iterdir()) == []  # temp + backup cleaned up
+
+
+def test_backup_is_kept_when_restoring_it_also_fails(tmp_path):
+    target = tmp_path / "config.ini"
+    target.write_text("precious")
+    real_open = open
+    real_copy2 = __import__("shutil").copy2
+    calls = {"n": 0}
+
+    def flaky_open(path, mode="r", *a, **kw):
+        if str(path) == str(target) and mode == "w":
+            real_open(path, mode, *a, **kw).close()  # truncates
+            raise OSError("disk full")
+        return real_open(path, mode, *a, **kw)
+
+    def copy2(src, dst, **kw):
+        calls["n"] += 1
+        if calls["n"] == 2:  # the restore (1st call is the backup)
+            raise OSError("restore failed")
+        return real_copy2(src, dst, **kw)
+
+    with (
+        patch("atomic_io.os.replace", side_effect=OSError("busy")),
+        patch("builtins.open", flaky_open),
+        patch("atomic_io.shutil.copy2", copy2),
+    ):
+        with pytest.raises(OSError):
+            atomic_write_text(str(target), "new")
+    backups = [p for p in tmp_path.iterdir() if p.suffix == ".bak"]
+    assert len(backups) == 1 and backups[0].read_text() == "precious"

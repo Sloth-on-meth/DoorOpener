@@ -5,6 +5,13 @@ import shutil
 import tempfile
 
 
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def atomic_write_text(path: str, content: str) -> None:
     """Write ``content`` to ``path`` without ever leaving it truncated or half-written.
 
@@ -37,25 +44,31 @@ def atomic_write_text(path: str, content: str) -> None:
         try:
             os.replace(tmp_path, path)
         except OSError:
-            backup_path = path + ".bak"
-            has_existing = os.path.exists(path)
-            if has_existing:
-                shutil.copy2(path, backup_path)
+            # Back up beside the temp file, not at path + ".bak": the temp file's directory is
+            # known to be writable (it may be /tmp when the target's directory is read-only).
+            backup_path = None
+            if os.path.exists(path):
+                bfd, backup_path = tempfile.mkstemp(dir=os.path.dirname(tmp_path), suffix=".bak")
+                os.close(bfd)
+                try:
+                    shutil.copy2(path, backup_path)
+                except Exception:
+                    _remove_quietly(backup_path)
+                    raise
             try:
                 with open(path, "w", encoding="utf-8") as dst:
                     dst.write(content)
                     dst.flush()
                     os.fsync(dst.fileno())
             except Exception:
-                if has_existing:
+                if backup_path:
+                    # If restoring fails too, this raises and the backup is deliberately kept:
+                    # it is then the only intact copy.
                     shutil.copy2(backup_path, path)
+                    _remove_quietly(backup_path)
                 raise
-            finally:
-                if has_existing:
-                    try:
-                        os.remove(backup_path)
-                    except OSError:
-                        pass
+            if backup_path:
+                _remove_quietly(backup_path)
             os.remove(tmp_path)
     except Exception:
         try:
