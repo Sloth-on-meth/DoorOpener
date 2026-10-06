@@ -43,12 +43,23 @@ def test_audit_log_survives_clear(client, app_module, mode):
     assert marker in _details(client)
 
 
-def test_admin_logs_reads_the_configured_log_file(client, app_module):
+def test_admin_logs_reads_the_configured_log_file(client, app_module, tmp_path, monkeypatch):
+    """/admin/logs must read app.log_path, not a hard-coded <app dir>/logs/log.txt.
+
+    Point log_path at a file in a non-default directory that only this test writes to; the old
+    hard-coded path could never see it.
+    """
+    import json
+
+    custom = tmp_path / "custom-logs" / "log.txt"
+    custom.parent.mkdir()
+    marker = f"custom-dir-{uuid.uuid4().hex}"
+    custom.write_text(
+        json.dumps({"timestamp": "2026-01-01T00:00:00+00:00", "status": "SUCCESS", "details": marker}) + "\n"
+    )
+    monkeypatch.setattr(app_module, "log_path", str(custom))
     _login(client)
-    marker = f"read-path-{uuid.uuid4().hex}"
-    app_module.log_attempt("SUCCESS", marker, user="c")
     assert marker in _details(client)
-    assert app_module.log_path.endswith("log.txt")
 
 
 def test_entry_written_during_test_only_clear_is_not_lost(client, app_module, monkeypatch):
