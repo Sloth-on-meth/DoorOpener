@@ -177,8 +177,11 @@ test_mode = config.getboolean("server", "test_mode", fallback=False)
 # limit keys on the client IP, so trusting more hops than actually exist lets any caller who can
 # reach the port directly pick their own IP via a forged X-Forwarded-For. 0 = no proxy (use the
 # socket address). Default 1 matches a single reverse proxy such as Traefik/nginx/Caddy.
-TRUSTED_PROXIES = int(
-    os.environ.get("DOOROPENER_TRUSTED_PROXIES", config.getint("server", "trusted_proxies", fallback=1))
+# Select the source first and parse only that value, so a bad INI entry can't break startup when
+# the environment override is valid.
+_env_proxies = os.environ.get("DOOROPENER_TRUSTED_PROXIES")
+TRUSTED_PROXIES = (
+    int(_env_proxies) if _env_proxies is not None else config.getint("server", "trusted_proxies", fallback=1)
 )
 if TRUSTED_PROXIES > 0:
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=TRUSTED_PROXIES, x_proto=TRUSTED_PROXIES, x_host=TRUSTED_PROXIES)

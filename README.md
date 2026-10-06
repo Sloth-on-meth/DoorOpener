@@ -55,7 +55,7 @@ services:
     container_name: dooropener
     env_file: .env
     ports:
-      - "${DOOROPENER_PORT:-6532}:${DOOROPENER_PORT:-6532}"
+      - "${DOOROPENER_BIND:-127.0.0.1}:${DOOROPENER_PORT:-6532}:${DOOROPENER_PORT:-6532}"
     volumes:
       - ./config.ini:/app/config.ini:ro
       - ./users.json:/app/users.json
@@ -70,7 +70,7 @@ cp .env.example .env               # set FLASK_SECRET_KEY at minimum
 docker compose up -d
 ```
 
-Then open `http://your-server:6532`.
+Then open `http://localhost:6532` on the Docker host, or the URL configured on your reverse proxy. The port is published on `127.0.0.1` by default; see `DOOROPENER_BIND` below if you need it reachable directly.
 
 ### Build locally
 
@@ -80,7 +80,7 @@ docker run -d --env-file .env \
   -v $(pwd)/config.ini:/app/config.ini:ro \
   -v $(pwd)/users.json:/app/users.json \
   -v $(pwd)/logs:/app/logs \
-  -p 6532:6532 dooropener:latest
+  -p 127.0.0.1:6532:6532 dooropener:latest
 ```
 
 ### Without Docker
