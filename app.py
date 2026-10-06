@@ -1500,50 +1500,54 @@ def admin_logs_clear():
             finally:
                 _attempt_handler.release()
         elif mode == "test_only":
-            # Filter out lines that look like TEST MODE entries
-            lines = []
-            try:
-                with open(log_path, "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-            except FileNotFoundError:
-                lines = []
-
-            filtered = []
-            for line in lines:
-                try:
-                    json_start = line.find("{")
-                    candidate = line[json_start:] if json_start != -1 else line
-                    obj = json.loads(candidate)
-                    details = str(obj.get("details", ""))
-                    # Remove entries that explicitly contain TEST MODE in details
-                    if "TEST MODE" in details:
-                        removed += 1
-                        continue
-                    filtered.append(line)
-                except Exception:
-                    # If unparsable, keep line
-                    filtered.append(line)
-            kept = len(filtered)
-
-            # Swap the file while holding the handler lock, then drop the handler's open stream.
-            # Without that, the handler keeps writing to the old (now unlinked) inode and every
-            # later audit entry silently disappears. The next emit() reopens log_path.
-            fd, tmp_path = tempfile.mkstemp(prefix="log.", suffix=".txt", dir=os.path.dirname(log_path) or None)
+            # Hold the handler lock for the whole read -> filter -> swap. Locking only the swap
+            # would let an audit entry written after the read but before the swap be dropped.
+            # After the swap, close the handler's stream: it still points at the old (now
+            # unlinked) inode, so without that every later entry silently disappears. The next
+            # emit() reopens log_path.
             _attempt_handler.acquire()
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as tmp:
-                    tmp.writelines(filtered)
-                os.replace(tmp_path, log_path)
-                if _attempt_handler.stream:
-                    _attempt_handler.stream.close()
-                    _attempt_handler.stream = None
+                # Filter out lines that look like TEST MODE entries
+                lines = []
+                try:
+                    with open(log_path, "r", encoding="utf-8") as f:
+                        lines = f.readlines()
+                except FileNotFoundError:
+                    lines = []
+
+                filtered = []
+                for line in lines:
+                    try:
+                        json_start = line.find("{")
+                        candidate = line[json_start:] if json_start != -1 else line
+                        obj = json.loads(candidate)
+                        details = str(obj.get("details", ""))
+                        # Remove entries that explicitly contain TEST MODE in details
+                        if "TEST MODE" in details:
+                            removed += 1
+                            continue
+                        filtered.append(line)
+                    except Exception:
+                        # If unparsable, keep line
+                        filtered.append(line)
+                kept = len(filtered)
+
+                fd, tmp_path = tempfile.mkstemp(prefix="log.", suffix=".txt", dir=os.path.dirname(log_path) or None)
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as tmp:
+                        tmp.writelines(filtered)
+                    os.replace(tmp_path, log_path)
+                    if _attempt_handler.stream:
+                        _attempt_handler.stream.close()
+                        _attempt_handler.stream = None
+                finally:
+                    try:
+                        if os.path.exists(tmp_path):
+                            os.remove(tmp_path)
+                    except Exception:
+                        logger.exception(f"Failed to remove temporary log file temp_path={tmp_path}")
             finally:
                 _attempt_handler.release()
-                try:
-                    if os.path.exists(tmp_path):
-                        os.remove(tmp_path)
-                except Exception:
-                    logger.exception(f"Failed to remove temporary log file temp_path={tmp_path}")
         else:
             return jsonify({"error": "Invalid mode"}), 400
 
