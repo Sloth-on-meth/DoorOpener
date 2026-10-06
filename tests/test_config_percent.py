@@ -49,13 +49,15 @@ def test_percent_in_password_and_notice_with_real_configparser(tmp_path):
     for d in ("templates", "static"):
         shutil.copytree(os.path.join(ROOT, d), work / d)
     (work / "config.ini").write_text(CONFIG)
-    env = {
-        **os.environ,
-        "DOOROPENER_LOG_DIR": str(tmp_path / "logs"),
-        "USERS_STORE_PATH": str(tmp_path / "users.json"),
-        "FLASK_SECRET_KEY": "x" * 32,
-        "DOOROPENER_ALLOW_INSECURE_DEFAULTS": "true",
-    }
+    # Drop pytest-cov's env vars: otherwise its .pth hook measures this throwaway copy of the app
+    # and its uncovered lines drag the project's coverage below the CI gate.
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("COV_CORE", "COVERAGE"))}
+    env.update(
+        DOOROPENER_LOG_DIR=str(tmp_path / "logs"),
+        USERS_STORE_PATH=str(tmp_path / "users.json"),
+        FLASK_SECRET_KEY="x" * 32,
+        DOOROPENER_ALLOW_INSECURE_DEFAULTS="true",
+    )
     out = subprocess.run(
         [sys.executable, "-I", "-c", f"import sys; sys.path.insert(0, {str(work)!r}); {SCRIPT}"],
         cwd=work,
