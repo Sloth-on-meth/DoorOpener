@@ -12,6 +12,28 @@ def test_degraded_pins_fail_closed_without_a_good_snapshot(tmp_path):
     assert store.degraded_pins({"on": "2222"}) == {}
 
 
+def test_degraded_pins_reflect_disable_made_after_the_last_login(tmp_path):
+    """update_user() must refresh the snapshot, not just effective_pins()."""
+    path = tmp_path / "users.json"
+    store = UsersStore(str(path))
+    store.create_user("alice", "1111")
+    base = {"alice": "1111", "bob": "2222"}
+    store.effective_pins(base)
+    store.update_user("alice", active=False)
+    path.write_text("{corrupt")
+    assert store.degraded_pins(base) == {"bob": "2222"}
+
+
+def test_degraded_pins_do_not_resurrect_a_config_pin_the_store_replaced(tmp_path):
+    path = tmp_path / "users.json"
+    store = UsersStore(str(path))
+    store.create_user("alice", "9999")  # overrides config's alice=1111
+    base = {"alice": "1111"}
+    assert store.effective_pins(base) == {"alice": "9999"}
+    path.write_text("{corrupt")
+    assert store.degraded_pins(base) == {"alice": "9999"}
+
+
 def test_degraded_pins_exclude_users_known_disabled(tmp_path):
     path = tmp_path / "users.json"
     store = UsersStore(str(path))
@@ -31,7 +53,7 @@ def test_login_does_not_revive_disabled_config_user_when_store_corrupt(client, t
     store = UsersStore(str(path))
     store.create_user("off", "1111", active=False)
     monkeypatch.setattr(app_module, "users_store", store)
-    app_module.user_pins.update({"off": "1111", "on": "2222"})
+    monkeypatch.setattr(app_module, "user_pins", {"off": "1111", "on": "2222"})
 
     assert client.post("/open-door", json={"pin": "2222"}, headers=HEADERS).status_code == 200
     path.write_text("{corrupt")
