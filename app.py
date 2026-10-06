@@ -1412,7 +1412,6 @@ def admin_logs():
 
     try:
         logs = []
-        log_path = os.path.join(os.path.dirname(__file__), "logs", "log.txt")
 
         if os.path.exists(log_path):
             try:
@@ -1489,13 +1488,17 @@ def admin_logs_clear():
         removed = 0
         kept = 0
         if mode == "all":
-            # Truncate file
+            # Truncate in place under the handler lock. The handler's stream is O_APPEND, so its
+            # next write lands at the new end of file.
+            _attempt_handler.acquire()
             try:
                 with open(log_path, "w", encoding="utf-8"):
                     pass
             except FileNotFoundError:
                 # Nothing to clear
                 pass
+            finally:
+                _attempt_handler.release()
         elif mode == "test_only":
             # Filter out lines that look like TEST MODE entries
             lines = []
@@ -1522,13 +1525,20 @@ def admin_logs_clear():
                     filtered.append(line)
             kept = len(filtered)
 
-            # Atomic write
+            # Swap the file while holding the handler lock, then drop the handler's open stream.
+            # Without that, the handler keeps writing to the old (now unlinked) inode and every
+            # later audit entry silently disappears. The next emit() reopens log_path.
             fd, tmp_path = tempfile.mkstemp(prefix="log.", suffix=".txt", dir=os.path.dirname(log_path) or None)
+            _attempt_handler.acquire()
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as tmp:
                     tmp.writelines(filtered)
                 os.replace(tmp_path, log_path)
+                if _attempt_handler.stream:
+                    _attempt_handler.stream.close()
+                    _attempt_handler.stream = None
             finally:
+                _attempt_handler.release()
                 try:
                     if os.path.exists(tmp_path):
                         os.remove(tmp_path)
