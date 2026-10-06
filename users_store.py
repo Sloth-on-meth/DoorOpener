@@ -34,6 +34,8 @@ class UsersStore:
     def __init__(self, path: str):
         self.path = path
         self.data: Dict[str, Any] = {"users": {}}
+        # Usernames disabled in the last successfully-loaded snapshot (None = never loaded).
+        self._last_inactive: Optional[set] = None
 
     def _load_file(self) -> None:
         if not os.path.exists(self.path):
@@ -124,6 +126,7 @@ class UsersStore:
 
     def effective_pins(self, base_pins: Dict[str, str]) -> Dict[str, str]:
         self._load_file()
+        self._last_inactive = {u for u, m in self.data["users"].items() if not bool(m.get("active", True))}
         effective: Dict[str, str] = {}
         # Start with base pins (implicitly active)
         for user, pin in (base_pins or {}).items():
@@ -140,6 +143,17 @@ class UsersStore:
             if isinstance(pin, str) and 4 <= len(pin) <= 8 and pin.isdigit():
                 effective[user] = pin
         return effective
+
+    def degraded_pins(self, base_pins: Dict[str, str]) -> Dict[str, str]:
+        """PINs to honour when the store file can't be read.
+
+        Falling back to config.ini alone would silently re-enable anyone disabled in the store.
+        So: drop every user known to be disabled from the last good snapshot, and if there is no
+        snapshot (store unreadable since startup) fail closed rather than guess.
+        """
+        if self._last_inactive is None:
+            return {}
+        return {u: p for u, p in (base_pins or {}).items() if u not in self._last_inactive}
 
     def list_users(self, include_pins: bool = False) -> Dict[str, Any]:
         self._load_file()
@@ -227,8 +241,15 @@ class UsersStore:
         return username in self.data["users"]
 
     def find_disabled_user_by_pin(self, pin: str) -> Optional[str]:
-        """Return the username of an inactive user whose PIN matches, or None."""
-        self._ensure_loaded()
+        """Return the username of an inactive user whose PIN matches, or None.
+
+        Best-effort: an unreadable store yields None so a wrong PIN is still counted as an
+        ordinary failure (rather than raising, which would skip the rate-limit counters).
+        """
+        try:
+            self._ensure_loaded()
+        except UsersStoreError:
+            return None
         for username, meta in self.data["users"].items():
             if not bool(meta.get("active", True)):
                 stored_pin = meta.get("pin", "")
