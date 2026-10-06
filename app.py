@@ -240,7 +240,9 @@ ha_headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "applicatio
 
 # Short-lived cache of the last battery read, shared across all polling clients.
 BATTERY_CACHE_TTL = 30  # seconds
-_battery_cache: dict = {"level": None, "ts": 0.0}
+# ts starts at -inf, not 0.0: time.monotonic() counts from boot, so with 0.0 a host (or CI runner)
+# up for less than BATTERY_CACHE_TTL would treat the empty initial entry as a fresh cache hit.
+_battery_cache: dict = {"level": None, "ts": float("-inf")}
 
 # --- Enhanced Security & Rate Limiting ---
 ip_failed_attempts = defaultdict(int)

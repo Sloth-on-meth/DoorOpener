@@ -54,3 +54,15 @@ def test_admin_authentication(client):
     # Test unauthenticated access
     response = client.get("/admin/logs")
     assert response.status_code == 401
+
+
+def test_battery_fetches_on_a_freshly_booted_host(client, monkeypatch):
+    """time.monotonic() counts from boot; a host up for < BATTERY_CACHE_TTL must still fetch."""
+    import time
+
+    monkeypatch.setattr(time, "monotonic", lambda: 10.0)
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"state": "85"}
+    with patch("requests.get", return_value=mock_response):
+        assert client.get("/battery").json["level"] == 85
