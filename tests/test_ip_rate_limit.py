@@ -13,8 +13,8 @@ def app_module():
 
 
 @pytest.fixture
-def client(app_module):
-    app_module.app.config["TESTING"] = True
+def client(app_module, monkeypatch):
+    monkeypatch.setitem(app_module.app.config, "TESTING", True)
     with app_module.app.test_client() as c:
         yield c
 
@@ -29,8 +29,8 @@ def test_identifier_ignores_user_agent_and_language(app_module):
     assert len(seen) == 1
 
 
-def test_rotating_user_agent_still_gets_blocked(client, app_module):
-    app_module.test_mode = True
+def test_rotating_user_agent_still_gets_blocked(client, app_module, monkeypatch):
+    monkeypatch.setattr(app_module, "test_mode", True)
     statuses = []
     for i in range(app_module.MAX_ATTEMPTS + 1):
         client.delete_cookie("session")  # also drop the cookie so only the IP can throttle
@@ -61,7 +61,10 @@ def test_env_override_wins_even_if_ini_value_is_invalid(tmp_path):
         "[HomeAssistant]\nurl = http://x\ntoken = t\nswitch_entity = switch.d\n"
         "[admin]\nadmin_password = a-real-password\n[server]\ntrusted_proxies = not-a-number\n"
     )
-    env = {**os.environ, "DOOROPENER_LOG_DIR": str(tmp_path / "logs"), "USERS_STORE_PATH": str(tmp_path / "u.json")}
+    # Drop pytest-cov's env vars: otherwise its .pth hook measures this throwaway copy of the app
+    # and its uncovered lines drag the project's coverage below the CI gate.
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("COV_CORE", "COVERAGE"))}
+    env.update(DOOROPENER_LOG_DIR=str(tmp_path / "logs"), USERS_STORE_PATH=str(tmp_path / "u.json"))
     code = f"import sys; sys.path.insert(0, {str(work)!r}); import app; print(app.TRUSTED_PROXIES)"
 
     ok = subprocess.run(
