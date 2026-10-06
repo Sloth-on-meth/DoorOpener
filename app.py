@@ -7,6 +7,7 @@ enhanced multi-layer security, timezone support, and comprehensive brute force p
 """
 
 import hmac
+import io
 import json
 import logging
 import os
@@ -37,6 +38,7 @@ from flask import (
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+from atomic_io import atomic_write_text
 from users_store import UsersStore
 
 try:
@@ -124,12 +126,14 @@ config.read(config_path)
 
 
 def save_config() -> None:
-    """Persist the current in-memory config to disk directly.
+    """Persist the current in-memory config to disk without risking a truncated file.
 
+    config.ini holds the HA token and admin password, so a crash mid-write must not corrupt it.
     Note: If config.ini is mounted read-only, this will raise a PermissionError or OSError.
     """
-    with open(config_path, "w", encoding="utf-8") as f:
-        config.write(f)
+    buf = io.StringIO()
+    config.write(buf)
+    atomic_write_text(config_path, buf.getvalue())
 
 
 # If no env secret key was provided, allow overriding the temporary random with config.ini
