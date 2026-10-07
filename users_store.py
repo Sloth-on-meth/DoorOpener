@@ -109,7 +109,10 @@ class UsersStore:
                     bfd, backup_path = tempfile.mkstemp(dir=os.path.dirname(tmp_path), suffix=".bak")
                     os.close(bfd)
                     try:
-                        shutil.copy2(self.path, backup_path)
+                        # copyfile, not copy2: copy2 also copies permission bits, which would
+                        # turn the 0600 backup (made by mkstemp) into a copy of users.json's mode,
+                        # e.g. a world-readable file of PINs in the shared temp directory.
+                        shutil.copyfile(self.path, backup_path)
                     except Exception:
                         _remove_quietly(backup_path)
                         raise
@@ -122,9 +125,16 @@ class UsersStore:
                         os.fsync(dst.fileno())
                 except Exception:
                     if backup_path:
-                        # If restoring fails too, this raises and the backup is deliberately
-                        # kept: it is then the only intact copy.
-                        shutil.copy2(backup_path, self.path)
+                        # If restoring fails too, the backup is deliberately kept (it is then the
+                        # only intact copy) and the error says where it is. copyfile keeps
+                        # users.json's own permission bits.
+                        try:
+                            shutil.copyfile(backup_path, self.path)
+                        except Exception as restore_err:
+                            raise UsersStoreError(
+                                f"Could not write {self.path} and could not restore it; "
+                                f"the previous contents are preserved in {backup_path}"
+                            ) from restore_err
                         _remove_quietly(backup_path)
                     raise
                 if backup_path:
