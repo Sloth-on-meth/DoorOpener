@@ -48,6 +48,43 @@ except Exception:
 
 APP_VERSION = "1.14.1"
 
+# Values that must never be used as a signing key: anything in a public repo or example file
+# lets an attacker forge session cookies (including admin_authenticated=True).
+MIN_SECRET_KEY_LENGTH = 16
+_PLACEHOLDER_SECRETS = {
+    "your-secret-key-here",
+    "change-me-to-something-long-and-random",
+    "changeme",
+    "change-me",
+    "secret",
+    "secret_key",
+    "dev",
+    "test",
+}
+_PLACEHOLDER_ADMIN_PASSWORDS = {
+    "admin123",
+    "admin",
+    "password",
+    "changeme",
+    "change-me",
+    "change-me-to-a-real-password",
+    "your_admin_password",
+    "",
+}
+_ALLOW_INSECURE = os.environ.get("DOOROPENER_ALLOW_INSECURE_DEFAULTS", "").lower() == "true"
+
+
+def _reject_weak_secret(value: str, source: str) -> None:
+    if _ALLOW_INSECURE:
+        return
+    if value.strip().lower() in _PLACEHOLDER_SECRETS or len(value) < MIN_SECRET_KEY_LENGTH:
+        raise RuntimeError(
+            f"Refusing to start: {source} is a placeholder or shorter than {MIN_SECRET_KEY_LENGTH} characters, "
+            "so session cookies could be forged. Generate one with: "
+            'python -c "import secrets; print(secrets.token_hex(32))"'
+        )
+
+
 # --- Timezone Setup ---
 # Get timezone from environment variable, default to UTC
 TZ = os.environ.get("TZ", "UTC")
@@ -99,43 +136,6 @@ attempt_logger.handlers = [_attempt_handler]
 # --- Flask App Setup ---
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
-# Values that must never be used as a signing key: anything in a public repo or example file
-# lets an attacker forge session cookies (including admin_authenticated=True).
-MIN_SECRET_KEY_LENGTH = 16
-_PLACEHOLDER_SECRETS = {
-    "your-secret-key-here",
-    "change-me-to-something-long-and-random",
-    "changeme",
-    "change-me",
-    "secret",
-    "secret_key",
-    "dev",
-    "test",
-}
-_PLACEHOLDER_ADMIN_PASSWORDS = {
-    "admin123",
-    "admin",
-    "password",
-    "changeme",
-    "change-me",
-    "change-me-to-a-real-password",
-    "your_admin_password",
-    "",
-}
-_ALLOW_INSECURE = os.environ.get("DOOROPENER_ALLOW_INSECURE_DEFAULTS", "").lower() == "true"
-
-
-def _reject_weak_secret(value: str, source: str) -> None:
-    if _ALLOW_INSECURE:
-        return
-    if value.strip().lower() in _PLACEHOLDER_SECRETS or len(value) < MIN_SECRET_KEY_LENGTH:
-        raise RuntimeError(
-            f"Refusing to start: {source} is a placeholder or shorter than {MIN_SECRET_KEY_LENGTH} characters, "
-            "so session cookies could be forged. Generate one with: "
-            'python -c "import secrets; print(secrets.token_hex(32))"'
-        )
-
-
 # Prefer fixed secret from environment; fallback to temporary random (will be overridden by config.ini later if present)
 _env_secret = os.environ.get("FLASK_SECRET_KEY")
 if _env_secret:
