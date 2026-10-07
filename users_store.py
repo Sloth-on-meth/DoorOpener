@@ -13,6 +13,13 @@ class UsersStoreError(RuntimeError):
     """Raised when the on-disk users store cannot be safely read or written."""
 
 
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -89,14 +96,26 @@ class UsersStore:
                 # missing or half-written.
                 os.replace(tmp_path, self.path)
             except OSError:
-                # Cross-device: os.replace() can't atomically rename here, so
-                # back up the existing file before overwriting it. If the copy
-                # below fails partway (disk fills up, process killed), restore
-                # from the backup instead of leaving users.json truncated.
-                backup_path = self.path + ".bak"
-                has_existing = os.path.exists(self.path)
-                if has_existing:
-                    shutil.copy2(self.path, backup_path)
+                # Cross-device (e.g. users.json is a single-file Docker bind mount): os.replace()
+                # can't rename here, so back up the existing file before overwriting it. If the
+                # copy below fails partway (disk fills up, process killed), restore from the
+                # backup instead of leaving users.json truncated.
+                #
+                # The backup goes beside the temp file, NOT beside users.json: with a single-file
+                # mount the app directory (/app) is typically root-owned and can't take new files,
+                # which is exactly why the temp file fell back to /tmp (see #41).
+                backup_path = None
+                if os.path.exists(self.path):
+                    bfd, backup_path = tempfile.mkstemp(dir=os.path.dirname(tmp_path), suffix=".bak")
+                    os.close(bfd)
+                    try:
+                        # copyfile, not copy2: copy2 also copies permission bits, which would
+                        # turn the 0600 backup (made by mkstemp) into a copy of users.json's mode,
+                        # e.g. a world-readable file of PINs in the shared temp directory.
+                        shutil.copyfile(self.path, backup_path)
+                    except Exception:
+                        _remove_quietly(backup_path)
+                        raise
                 try:
                     with open(tmp_path, "r", encoding="utf-8") as src:
                         content = src.read()
@@ -105,15 +124,21 @@ class UsersStore:
                         dst.flush()
                         os.fsync(dst.fileno())
                 except Exception:
-                    if has_existing:
-                        shutil.copy2(backup_path, self.path)
-                    raise
-                finally:
-                    if has_existing:
+                    if backup_path:
+                        # If restoring fails too, the backup is deliberately kept (it is then the
+                        # only intact copy) and the error says where it is. copyfile keeps
+                        # users.json's own permission bits.
                         try:
-                            os.remove(backup_path)
-                        except OSError:
-                            pass
+                            shutil.copyfile(backup_path, self.path)
+                        except Exception as restore_err:
+                            raise UsersStoreError(
+                                f"Could not write {self.path} and could not restore it; "
+                                f"the previous contents are preserved in {backup_path}"
+                            ) from restore_err
+                        _remove_quietly(backup_path)
+                    raise
+                if backup_path:
+                    _remove_quietly(backup_path)
                 os.remove(tmp_path)
         except Exception:
             try:
