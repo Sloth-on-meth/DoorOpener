@@ -1,3 +1,26 @@
+## v[1.14.2] - 2026-10-07
+
+### 🐛 Bug Fixes
+- **Editing users failed with `Permission denied: '/app/users.json.bak'`** (#41, #53) — with `users.json` bind-mounted as a single file, the in-place fallback created its backup next to the file, in a root-owned `/app` the app can't write to. The backup now lives beside the temp file (already writable), is created with restrictive permissions (it no longer inherits `users.json`'s mode, which could leave a world-readable copy of every PIN in `/tmp`), is kept if restoring it also fails, and the error then names where it is. The `USERS_STORE_PATH` directory-mount workaround is no longer needed.
+- **Audit log silently stopped after "Clear test entries"** (#46) — the log file was replaced while the log handler kept writing to the old, unlinked file, so every later entry was lost until restart. The swap now happens under the handler lock and the handler reopens the file. `/admin/logs` also honours `DOOROPENER_LOG_DIR`.
+- **Non-ASCII digits caused a 500** (#49) — `str.isdigit()` accepts digits like Arabic-Indic ones, which then made `hmac.compare_digest` raise. PINs must now be ASCII digits (a clean `400 Invalid PIN format`, counted as a failed attempt).
+- **`%` in config values** (#50) — `config.set()` raised for a value like a notice of "50% off" (a 500), and a `%` in `admin_password` broke startup. `ConfigParser` interpolation is now disabled.
+- **Flaky battery cache on a freshly booted host** (#54) — the cache started at timestamp `0.0` and `time.monotonic()` counts from boot, so a host up for under 30s served the empty initial entry (`{"level": null}`) instead of fetching. This also made `test_battery_route` fail intermittently in CI.
+
+### 🔐 Security & Hardening
+- **`users.json` access is serialised** (#47) — a lock around every load-modify-save stops a concurrent `touch_user()` from writing back a stale snapshot and undoing an admin edit (for example re-enabling a just-disabled user). Every public method is locked, including ones added later.
+- **An unreadable `users.json` no longer re-enables disabled users** (#48) — the fallback used `config.ini` PINs wholesale. It now derives access from the last good snapshot (read or write), so disables, PIN changes and creations since the last login are honoured. A wrong PIN is also still counted when the store is unreadable instead of raising before the rate-limit counters.
+- **`config.ini` is written atomically** (#51) — it was truncated and rewritten in place, so a crash or full disk mid-write could corrupt the file holding the HA token and admin password. New `atomic_io.atomic_write_text` handles read-only directories and single-file bind mounts, and keeps its backup private.
+- **The service worker no longer caches `/admin/*`, `/auth/status` or `/battery`** (#52) — only the app shell and `/static/` are cached, so user lists, audit logs and auth state aren't left in Cache Storage or replayed offline after logout. The cache version is bumped so existing entries are purged.
+
+### ⚠️ Changed behaviour
+- A PIN that is not valid ASCII digits now gets `400` instead of causing a `500` (#49).
+- If `users.json` is corrupt **and has never loaded since startup**, nobody can open the door until the file is fixed (previously it fell back to `config.ini` PINs, which could re-enable disabled users) (#48).
+- Admin pages and the battery display no longer work offline; the keypad shell and static assets still do (#52).
+
+### 🧪 Tests
+- 150 tests (up from 108), including regression tests that fail on the previous code: real-permissions reproduction of #41, audit-log survival after a clear (including a concurrent writer), concurrent store access, ASCII-only PINs, `%` in config via the real `ConfigParser`, atomic config writes, and the service worker running in a Node harness.
+
 ## v[1.14.1] - 2026-07-08
 
 ### 🐛 Bug Fixes
