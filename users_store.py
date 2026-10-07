@@ -1,11 +1,12 @@
-import functools
 import hmac
 import json
 import os
 import shutil
 import tempfile
-import threading
 from datetime import datetime, timezone
+from functools import wraps
+from inspect import isfunction
+from threading import RLock
 from typing import Any, Dict, Optional
 
 ISO_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
@@ -17,22 +18,6 @@ class UsersStoreError(RuntimeError):
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _locked(method):
-    """Serialise a public method on the store's lock.
-
-    Every operation is load -> mutate -> save on shared instance state, and gunicorn runs
-    several threads. Without this, a touch_user() racing an admin edit can write back a stale
-    snapshot and silently undo it (e.g. re-activate a user who was just disabled).
-    """
-
-    @functools.wraps(method)
-    def wrapper(self, *args, **kwargs):
-        with self._lock:
-            return method(self, *args, **kwargs)
-
-    return wrapper
 
 
 class UsersStore:
@@ -52,7 +37,6 @@ class UsersStore:
     def __init__(self, path: str):
         self.path = path
         self.data: Dict[str, Any] = {"users": {}}
-        self._lock = threading.RLock()
 
     def _load_file(self) -> None:
         if not os.path.exists(self.path):
@@ -141,7 +125,6 @@ class UsersStore:
                 pass
             raise
 
-    @_locked
     def effective_pins(self, base_pins: Dict[str, str]) -> Dict[str, str]:
         self._load_file()
         effective: Dict[str, str] = {}
@@ -161,7 +144,6 @@ class UsersStore:
                 effective[user] = pin
         return effective
 
-    @_locked
     def list_users(self, include_pins: bool = False) -> Dict[str, Any]:
         self._load_file()
         items = []
@@ -193,7 +175,6 @@ class UsersStore:
     def _validate_pin(pin: str) -> bool:
         return isinstance(pin, str) and pin.isdigit() and 4 <= len(pin) <= 8
 
-    @_locked
     def create_user(self, username: str, pin: str, active: bool = True) -> None:
         self._ensure_loaded()
         if not self._validate_username(username):
@@ -213,7 +194,6 @@ class UsersStore:
         }
         self._save_atomic()
 
-    @_locked
     def update_user(self, username: str, pin: Optional[str] = None, active: Optional[bool] = None) -> None:
         self._ensure_loaded()
         if username not in self.data["users"]:
@@ -230,7 +210,6 @@ class UsersStore:
         meta["updated_at"] = _now_iso()
         self._save_atomic()
 
-    @_locked
     def delete_user(self, username: str) -> None:
         self._ensure_loaded()
         if username not in self.data["users"]:
@@ -238,7 +217,6 @@ class UsersStore:
         del self.data["users"][username]
         self._save_atomic()
 
-    @_locked
     def touch_user(self, username: str) -> None:
         self._ensure_loaded()
         if username in self.data["users"]:
@@ -247,12 +225,10 @@ class UsersStore:
             self.data["users"][username]["times_used"] = self.data["users"][username].get("times_used", 0) + 1
             self._save_atomic()
 
-    @_locked
     def user_exists(self, username: str) -> bool:
         self._ensure_loaded()
         return username in self.data["users"]
 
-    @_locked
     def find_disabled_user_by_pin(self, pin: str) -> Optional[str]:
         """Return the username of an inactive user whose PIN matches, or None."""
         self._ensure_loaded()
@@ -263,7 +239,6 @@ class UsersStore:
                     return username
         return None
 
-    @_locked
     def pin_exists(self, pin: str, exclude_username: Optional[str] = None) -> bool:
         """Return True if the PIN is already assigned to any store user (excluding one username)."""
         self._ensure_loaded()
@@ -274,3 +249,27 @@ class UsersStore:
             if isinstance(stored_pin, str) and stored_pin == pin:
                 return True
         return False
+
+
+def _locked(method):
+    """Serialise a method on the store's re-entrant lock.
+
+    Every operation is load -> mutate -> save on shared instance state, and gunicorn runs
+    several threads. Without this, a touch_user() racing an admin edit can write back a stale
+    snapshot and silently undo it (e.g. re-activate a user who was just disabled).
+    """
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        # setdefault is atomic in CPython, so concurrent first calls end up sharing one lock.
+        with self.__dict__.setdefault("_lock", RLock()):
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
+# Lock every public method. Done here rather than with a decorator on each def so that methods
+# added later are protected by default and the method bodies above stay untouched.
+for _name, _attr in list(vars(UsersStore).items()):
+    if not _name.startswith("_") and isfunction(_attr):
+        setattr(UsersStore, _name, _locked(_attr))

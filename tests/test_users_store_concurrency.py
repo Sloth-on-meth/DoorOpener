@@ -36,3 +36,14 @@ def test_concurrent_touches_are_all_counted(tmp_path):
     for t in threads:
         t.join()
     assert UsersStore(str(tmp_path / "users.json")).list_users()["users"][0]["times_used"] == 100
+
+
+def test_every_public_method_is_locked_and_private_ones_are_not():
+    """Methods added later are protected by default; helpers called under the lock are not wrapped."""
+    from inspect import isfunction
+
+    public = [n for n, a in vars(UsersStore).items() if not n.startswith("_") and isfunction(a)]
+    assert {"create_user", "update_user", "delete_user", "touch_user", "list_users", "effective_pins"} <= set(public)
+    for name in public:
+        assert hasattr(getattr(UsersStore, name), "__wrapped__"), name
+    assert not hasattr(UsersStore._load_file, "__wrapped__")
