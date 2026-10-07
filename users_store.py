@@ -1,3 +1,4 @@
+import copy
 import hmac
 import json
 import os
@@ -55,8 +56,17 @@ class UsersStore:
     def __init__(self, path: str):
         self.path = path
         self.data: Dict[str, Any] = {"users": {}}
+        # Copy of the store as of the last successful read or write (None = never succeeded).
+        self._last_good: Optional[Dict[str, Any]] = None
+
+    def _remember_good(self) -> None:
+        self._last_good = copy.deepcopy(self.data)
 
     def _load_file(self) -> None:
+        self._read_store()
+        self._remember_good()
+
+    def _read_store(self) -> None:
         if not os.path.exists(self.path):
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
             self.data = {"users": {}}
@@ -85,6 +95,10 @@ class UsersStore:
         self.data = data
 
     def _save_atomic(self) -> None:
+        self._write_store()
+        self._remember_good()
+
+    def _write_store(self) -> None:
         dir_path = os.path.dirname(self.path)
         os.makedirs(dir_path, exist_ok=True)
         # Prefer writing the temp file next to the target (same filesystem = atomic
@@ -161,14 +175,14 @@ class UsersStore:
                 pass
             raise
 
-    def effective_pins(self, base_pins: Dict[str, str]) -> Dict[str, str]:
-        self._load_file()
+    @staticmethod
+    def _merge(data: Dict[str, Any], base_pins: Dict[str, str]) -> Dict[str, str]:
         effective: Dict[str, str] = {}
         # Start with base pins (implicitly active)
         for user, pin in (base_pins or {}).items():
             effective[user] = pin
         # Apply JSON overrides/additions
-        for user, meta in self.data.get("users", {}).items():
+        for user, meta in data.get("users", {}).items():
             active = bool(meta.get("active", True))
             if not active:
                 # remove from effective if present
@@ -179,6 +193,23 @@ class UsersStore:
             if is_valid_pin(pin):
                 effective[user] = pin
         return effective
+
+    def effective_pins(self, base_pins: Dict[str, str]) -> Dict[str, str]:
+        self._load_file()
+        return self._merge(self.data, base_pins)
+
+    def degraded_pins(self, base_pins: Dict[str, str]) -> Dict[str, str]:
+        """PINs to honour when the store file can't be read.
+
+        Falling back to config.ini alone would silently re-enable users disabled in the store and
+        resurrect config PINs that a store record replaced. Instead, re-derive the effective PINs
+        from the last snapshot that was successfully read *or written* (so edits made since the
+        last login are included). With no snapshot (unreadable since startup) fail closed rather
+        than guess.
+        """
+        if self._last_good is None:
+            return {}
+        return self._merge(self._last_good, base_pins)
 
     def list_users(self, include_pins: bool = False) -> Dict[str, Any]:
         self._load_file()
@@ -266,8 +297,15 @@ class UsersStore:
         return username in self.data["users"]
 
     def find_disabled_user_by_pin(self, pin: str) -> Optional[str]:
-        """Return the username of an inactive user whose PIN matches, or None."""
-        self._ensure_loaded()
+        """Return the username of an inactive user whose PIN matches, or None.
+
+        Best-effort: an unreadable store yields None so a wrong PIN is still counted as an
+        ordinary failure (rather than raising, which would skip the rate-limit counters).
+        """
+        try:
+            self._ensure_loaded()
+        except UsersStoreError:
+            return None
         for username, meta in self.data["users"].items():
             if not bool(meta.get("active", True)):
                 stored_pin = meta.get("pin", "")

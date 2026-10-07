@@ -169,7 +169,9 @@ def get_effective_user_pins() -> dict:
     try:
         return users_store.effective_pins(user_pins)
     except Exception:
-        return dict(user_pins)
+        # Don't just fall back to config.ini: that would re-enable users disabled in the store.
+        logger.exception("Users store unreadable; using degraded PIN set (known-disabled users excluded)")
+        return users_store.degraded_pins(user_pins)
 
 
 # Admin Configuration
