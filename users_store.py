@@ -4,6 +4,9 @@ import os
 import shutil
 import tempfile
 from datetime import datetime, timezone
+from functools import wraps
+from inspect import isfunction
+from threading import RLock
 from typing import Any, Dict, Optional
 
 ISO_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
@@ -271,3 +274,27 @@ class UsersStore:
             if isinstance(stored_pin, str) and stored_pin == pin:
                 return True
         return False
+
+
+def _locked(method):
+    """Serialise a method on the store's re-entrant lock.
+
+    Every operation is load -> mutate -> save on shared instance state, and gunicorn runs
+    several threads. Without this, a touch_user() racing an admin edit can write back a stale
+    snapshot and silently undo it (e.g. re-activate a user who was just disabled).
+    """
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        # setdefault is atomic in CPython, so concurrent first calls end up sharing one lock.
+        with self.__dict__.setdefault("_lock", RLock()):
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
+# Lock every public method. Done here rather than with a decorator on each def so that methods
+# added later are protected by default and the method bodies above stay untouched.
+for _name, _attr in list(vars(UsersStore).items()):
+    if not _name.startswith("_") and isfunction(_attr):
+        setattr(UsersStore, _name, _locked(_attr))
