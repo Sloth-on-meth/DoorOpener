@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DoorOpener Web Portal v1.14.1
+DoorOpener Web Portal v1.14.2
 ------------------------------
 A secure Flask web app to open a door via Home Assistant API, with visual keypad interface,
 enhanced multi-layer security, timezone support, and comprehensive brute force protection.
@@ -46,7 +46,7 @@ try:
 except Exception:
     OAuth = None
 
-APP_VERSION = "1.14.1"
+APP_VERSION = "1.14.2"
 
 # --- Timezone Setup ---
 # Get timezone from environment variable, default to UTC
