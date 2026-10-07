@@ -119,7 +119,9 @@ app.config.update(
 )
 
 # --- Configuration ---
-config = ConfigParser()
+# interpolation=None: '%' is a legal character in passwords/notices; with the default
+# interpolation it makes config.set()/get() raise.
+config = ConfigParser(interpolation=None)
 config_path = os.path.join(os.path.dirname(__file__), "config.ini")
 config.read(config_path)
 
