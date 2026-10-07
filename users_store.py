@@ -27,6 +27,17 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def is_valid_pin(pin: Any) -> bool:
+    """4-8 ASCII digits. str.isdigit() alone also accepts Unicode digits (e.g. Arabic-Indic),
+    which hmac.compare_digest cannot compare."""
+    return isinstance(pin, str) and pin.isascii() and pin.isdigit() and 4 <= len(pin) <= 8
+
+
+def pins_equal(a: str, b: str) -> bool:
+    """Constant-time PIN comparison that tolerates non-ASCII input instead of raising TypeError."""
+    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+
+
 class UsersStore:
     """JSON-backed user store with atomic writes and merge-over-config behavior.
 
@@ -165,7 +176,7 @@ class UsersStore:
                     del effective[user]
                 continue
             pin = meta.get("pin")
-            if isinstance(pin, str) and 4 <= len(pin) <= 8 and pin.isdigit():
+            if is_valid_pin(pin):
                 effective[user] = pin
         return effective
 
@@ -198,7 +209,7 @@ class UsersStore:
 
     @staticmethod
     def _validate_pin(pin: str) -> bool:
-        return isinstance(pin, str) and pin.isdigit() and 4 <= len(pin) <= 8
+        return is_valid_pin(pin)
 
     def create_user(self, username: str, pin: str, active: bool = True) -> None:
         self._ensure_loaded()
@@ -260,7 +271,7 @@ class UsersStore:
         for username, meta in self.data["users"].items():
             if not bool(meta.get("active", True)):
                 stored_pin = meta.get("pin", "")
-                if isinstance(stored_pin, str) and hmac.compare_digest(pin, stored_pin):
+                if isinstance(stored_pin, str) and pins_equal(pin, stored_pin):
                     return username
         return None
 

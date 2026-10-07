@@ -38,7 +38,7 @@ from flask import (
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from users_store import UsersStore
+from users_store import UsersStore, is_valid_pin, pins_equal
 
 try:
     from authlib.integrations.flask_client import OAuth
@@ -457,7 +457,7 @@ def validate_pin_input(pin):
     try:
         if not isinstance(pin, str):
             raise ValueError("PIN must be a string")
-        if not pin.isdigit() or not (4 <= len(pin) <= 8):
+        if not is_valid_pin(pin):
             return False, None
         return True, pin
     except Exception as e:
@@ -819,7 +819,7 @@ def open_door():
 
         # Check PIN against user database (effective set)
         for user, user_pin in get_effective_user_pins().items():
-            if hmac.compare_digest(pin_from_request, user_pin):
+            if pins_equal(pin_from_request, user_pin):
                 matched_user = user
                 break
 
@@ -1767,14 +1767,14 @@ def admin_users_migrate(username: str):
     body = request.get_json(silent=True) or {}
     new_pin = body.get("pin")
     if new_pin is not None:
-        if not isinstance(new_pin, str) or not new_pin.isdigit() or not (4 <= len(new_pin) <= 8):
+        if not is_valid_pin(new_pin):
             return jsonify({"error": "PIN must be 4-8 digits"}), 400
         pin_to_use = new_pin
     else:
         pin_to_use = existing_pin
 
     # Validate PIN format
-    if not isinstance(pin_to_use, str) or not pin_to_use.isdigit() or not (4 <= len(pin_to_use) <= 8):
+    if not is_valid_pin(pin_to_use):
         return jsonify({"error": "PIN must be 4-8 digits"}), 400
 
     # Create user in JSON store
@@ -1833,7 +1833,7 @@ def admin_users_migrate_all():
             failed.append({"username": username, "error": "invalid_pin"})
             continue
         # Validate format
-        if not (existing_pin.isdigit() and 4 <= len(existing_pin) <= 8):
+        if not is_valid_pin(existing_pin):
             failed.append({"username": username, "error": "invalid_format"})
             continue
         # Skip if user already exists in JSON store
