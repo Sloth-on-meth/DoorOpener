@@ -19,7 +19,9 @@ bob = 5678
 charlie = 9012
 
 [admin]
-admin_password = admin123
+# REQUIRED: the app refuses to start with well-known defaults. May be plaintext or a hash:
+#   python -c "from werkzeug.security import generate_password_hash as g; print(g('your password'))"
+admin_password = change-me-to-a-real-password
 
 [server]
 # Port for the web server (default: 6532)
