@@ -52,11 +52,21 @@ def test_suspicious_request_blocked_open_door(client):
     assert resp.status_code == 403
 
 
-def test_global_rate_limit_blocks(client, app_module):
-    # Force global rate limit exceeded
+def test_global_threshold_alerts_but_does_not_lock_out_valid_pin(client, app_module, monkeypatch):
+    """Crossing the global failure threshold must alert, not deny the door to valid PINs."""
+    app_module.user_pins["ok"] = "4321"
     app_module.global_failed_attempts = app_module.MAX_GLOBAL_ATTEMPTS_PER_HOUR
-    resp = client.post("/open-door", data=json.dumps({"pin": "1234"}), headers=_std_headers())
-    assert resp.status_code == 429
+    resp = client.post("/open-door", data=json.dumps({"pin": "4321"}), headers=_std_headers())
+    assert resp.status_code == 200
+
+
+def test_global_threshold_crossing_sends_one_alert(client, app_module, monkeypatch):
+    alerts = []
+    monkeypatch.setattr(app_module, "_notify_admin", lambda t, b: alerts.append((t, b)))
+    app_module.global_failed_attempts = app_module.MAX_GLOBAL_ATTEMPTS_PER_HOUR - 1
+    for _ in range(3):
+        client.post("/open-door", data=json.dumps({"pin": "0000"}), headers=_std_headers())
+    assert len(alerts) == 1
 
 
 def test_open_door_session_blocked_flow(client, app_module, monkeypatch):
