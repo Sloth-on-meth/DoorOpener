@@ -13,7 +13,10 @@ services:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
     ports:
-      - "${DOOROPENER_PORT:-6532}:${DOOROPENER_PORT:-6532}"
+      # Bound to localhost by default so only your reverse proxy can reach it. Rate limits key on the
+      # client IP taken from X-Forwarded-For, which anyone who can reach this port directly could forge.
+      # Set DOOROPENER_BIND=0.0.0.0 only if you accept that (and set DOOROPENER_TRUSTED_PROXIES=0).
+      - "${DOOROPENER_BIND:-127.0.0.1}:${DOOROPENER_PORT:-6532}:${DOOROPENER_PORT:-6532}"
     volumes:
       - ./config.ini:/app/config.ini:rw
       - ./logs:/app/logs
