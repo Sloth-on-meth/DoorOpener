@@ -912,26 +912,11 @@ def open_door():
 
             return _send_open_command(matched_user, primary_ip, session_id, now)
         else:
-            # Check if the PIN belongs to a disabled store user before treating as wrong PIN
+            # A PIN belonging to a disabled account is treated exactly like any other wrong PIN
+            # (same counters, same response). Answering differently, or skipping the counters,
+            # would let an attacker probe which PINs belong to real accounts for free. The audit
+            # log still records which account it was.
             disabled_user = users_store.find_disabled_user_by_pin(pin_from_request)
-            if disabled_user:
-                log_attempt(
-                    "DISABLED_USER",
-                    "Access denied: account disabled",
-                    user=disabled_user,
-                    primary_ip=primary_ip,
-                    session_id=session_id,
-                    now=now,
-                )
-                return (
-                    jsonify(
-                        {
-                            "status": "error",
-                            "message": "Your account has been disabled. Contact the administrator.",
-                        }
-                    ),
-                    403,
-                )
 
             # Failed authentication - increment all counters
             ip_failed_attempts[identifier] += 1
@@ -950,7 +935,17 @@ def open_door():
             else:
                 reason = "Invalid PIN"
 
-            log_attempt("AUTH_FAILURE", reason, primary_ip=primary_ip, session_id=session_id, now=now)
+            if disabled_user:
+                log_attempt(
+                    "DISABLED_USER",
+                    f"Access denied: account disabled ({reason})",
+                    user=disabled_user,
+                    primary_ip=primary_ip,
+                    session_id=session_id,
+                    now=now,
+                )
+            else:
+                log_attempt("AUTH_FAILURE", reason, primary_ip=primary_ip, session_id=session_id, now=now)
             # Include blocked_until if a block is now active
             resp = {"status": "error", "message": reason}
             if session_blocked_until[session_id] and now < session_blocked_until[session_id]:
