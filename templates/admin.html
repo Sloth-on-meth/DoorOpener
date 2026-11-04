@@ -488,6 +488,10 @@
         }
         .modal-input:focus { border-color: rgba(100,181,246,0.5); }
         .modal-input::placeholder { color: rgba(255,255,255,0.3); }
+        .modal-pin-row { display: flex; gap: 8px; align-items: center; }
+        .modal-pin-row .modal-input { flex: 1; min-width: 0; }
+        .modal-pin-row .modal-pinlen { flex: 0 0 auto; width: auto; }
+        .modal-hint { font-size: 0.78rem; color: rgba(255,255,255,0.6); margin-top: 6px; min-height: 1.1em; }
 
         /* === SECTION HEADER === */
         .section-hd {
@@ -1593,12 +1597,45 @@
     }
 
     // ====== USER CRUD ======
+    // Fill the add-user PIN field with a random PIN that nobody else has (chosen by the server).
+    async function fillGeneratedPin(card) {
+        const input = card.querySelector('#um_pin');
+        const hint = card.querySelector('#um_pin_hint');
+        const length = card.querySelector('#um_pinlen').value;
+        hint.textContent = '';
+        try {
+            const res = await fetch('/admin/generate-pin?length=' + encodeURIComponent(length), {
+                credentials: 'same-origin',
+                cache: 'no-store'
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.pin) {
+                hint.textContent = data.error || 'Could not generate a PIN';
+                return;
+            }
+            input.value = data.pin;
+            input.type = 'text'; // show it: the admin has to pass it on to the user
+            hint.textContent = 'Generated a ' + data.pin.length + '-digit PIN that no one else uses. '
+                + 'Write it down before saving.';
+        } catch (e) {
+            hint.textContent = 'Could not generate a PIN';
+        }
+    }
+
     function openAddUser() {
-        showModal('Add User', `
+        const card = showModal('Add User', `
             <label class="modal-field-label">Username</label>
             <input id="um_username" class="modal-input" placeholder="letters, numbers, _-.">
             <label class="modal-field-label">PIN (4–8 digits)</label>
-            <input id="um_pin" class="modal-input" type="password" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 1234">
+            <div class="modal-pin-row">
+                <input id="um_pin" class="modal-input" type="password" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 1234">
+                <select id="um_pinlen" class="modal-input modal-pinlen" title="Length of the generated PIN">
+                    <option value="4">4</option><option value="5">5</option><option value="6" selected>6</option>
+                    <option value="7">7</option><option value="8">8</option>
+                </select>
+                <button id="um_generate" type="button" class="btn btn-ghost btn-sm">🎲 Generate</button>
+            </div>
+            <div id="um_pin_hint" class="modal-hint"></div>
         `, async card => {
             const username = card.querySelector('#um_username').value.trim();
             const pin = card.querySelector('#um_pin').value.trim();
@@ -1607,6 +1644,7 @@
             if (!/^\d{4,8}$/.test(pin)) { alert('PIN must be 4-8 digits'); throw new Error(); }
             await addUser(username, pin);
         });
+        card.querySelector('#um_generate').addEventListener('click', () => fillGeneratedPin(card));
     }
 
     async function addUser(username, pin) {

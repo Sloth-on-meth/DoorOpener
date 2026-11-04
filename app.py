@@ -1926,6 +1926,68 @@ def admin_users_create():
         return jsonify({"error": "Failed to create user"}), 500
 
 
+PIN_MIN_LENGTH = 4
+PIN_MAX_LENGTH = 8
+DEFAULT_GENERATED_PIN_LENGTH = 6
+
+
+def _is_trivial_pin(pin: str) -> bool:
+    """True for PINs anyone tries first: all one digit (1111) or a straight run (1234, 8765)."""
+    if len(set(pin)) == 1:
+        return True
+    steps = {int(b) - int(a) for a, b in zip(pin, pin[1:])}
+    return steps == {1} or steps == {-1}
+
+
+def generate_unused_pin(length: int, taken) -> "str | None":
+    """A random PIN of `length` digits that is not in `taken` and not trivially guessable.
+
+    Uses `secrets` (a PIN is a credential). Returns None only if no such PIN is left, which needs a
+    short length and an almost full PIN space.
+    """
+    if not PIN_MIN_LENGTH <= length <= PIN_MAX_LENGTH:
+        raise ValueError("invalid PIN length")
+    for _ in range(1000):
+        pin = "".join(secrets.choice("0123456789") for _ in range(length))
+        if pin not in taken and not _is_trivial_pin(pin):
+            return pin
+    if length <= 5:  # a small space that is nearly full: pick from what is actually left
+        free = [
+            pin
+            for pin in (f"{n:0{length}d}" for n in range(10**length))
+            if pin not in taken and not _is_trivial_pin(pin)
+        ]
+        if free:
+            return secrets.choice(free)
+    return None
+
+
+@app.route("/admin/generate-pin", methods=["GET"])
+def admin_generate_pin():
+    """Return a random PIN that no user has, for the admin's add-user form. Requires admin auth.
+
+    "In use" means the same as the duplicate check on create: PINs in config.ini and PINs of every
+    store user, including disabled ones. Nothing is reserved; create still re-checks for duplicates.
+    """
+    if not _require_admin_authenticated():
+        return jsonify({"error": "Authentication required"}), 401
+    try:
+        length = int(request.args.get("length", DEFAULT_GENERATED_PIN_LENGTH))
+    except ValueError:
+        length = 0
+    if not PIN_MIN_LENGTH <= length <= PIN_MAX_LENGTH:
+        return jsonify({"error": f"length must be {PIN_MIN_LENGTH}-{PIN_MAX_LENGTH}"}), 400
+    try:
+        taken = set(user_pins.values()) | users_store.all_pins()
+    except Exception as e:  # unreadable store: we can't promise the PIN is unused, so don't offer one
+        logger.error(f"Error reading PINs for generation: {e}")
+        return jsonify({"error": "Could not check existing PINs"}), 500
+    pin = generate_unused_pin(length, taken)
+    if pin is None:
+        return jsonify({"error": "No unused PIN of that length is left"}), 409
+    return jsonify({"pin": pin, "length": length})
+
+
 @app.route("/admin/users/<username>", methods=["PUT"])
 def admin_users_update(username: str):
     if not _require_admin_authenticated():
