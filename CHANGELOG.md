@@ -1,3 +1,35 @@
+## v[1.15.0] - 2026-11-05
+
+### ⚠️ Upgrade notes (changed defaults)
+- **The Docker port is now published on `127.0.0.1` by default** (#42). If you reach DoorOpener directly from another machine with no reverse proxy, set `DOOROPENER_BIND=0.0.0.0` and `DOOROPENER_TRUSTED_PROXIES=0` in `.env`.
+- **The app refuses to start with a placeholder or short secret key, or a default admin password** (#45). `FLASK_SECRET_KEY` / `[server] secret_key` must be at least 16 characters and not an example value, and `admin_password` must not be `admin123`, `admin`, `password` and similar. `admin_password` may now be a Werkzeug hash. `DOOROPENER_ALLOW_INSECURE_DEFAULTS=true` skips the checks for local development.
+- **Admin sessions now expire on the server** (#60): after 12 hours, or 30 days with "remember me" (`[security] admin_session_hours`, `admin_remember_days`). Admins log in again after that.
+- **Over plain HTTP, set `SESSION_COOKIE_SECURE=false`** or the admin page will accept the password and ask for it again (#39, #68). The login page now says so and the server logs a warning.
+
+### 🔐 Security & Hardening
+- **Rate limits key on the client IP only** (#42). They used a hash of the IP plus `User-Agent`/`Accept-Language`, so changing a header reset the counter. New `DOOROPENER_TRUSTED_PROXIES` / `[server] trusted_proxies` (default 1) sets how many reverse proxies' `X-Forwarded-For` is trusted, so a client reaching the port directly can no longer forge its IP.
+- **The global failure lockout is replaced by an alert and per-IP backoff** (#43). After 50 failed attempts in an hour every PIN, including valid ones, was refused, so anyone could lock everyone out. It now writes a `GLOBAL_THRESHOLD` audit entry and sends one Pushbullet alert; each consecutive block for the same client doubles (capped at 24 hours) and resets on a successful login.
+- **A disabled account's PIN no longer bypasses the failure counters** (#44): it is counted and answered exactly like any wrong PIN (401), so it can't be used to probe which PINs belong to real accounts. The audit log still records `DISABLED_USER`.
+- **OIDC callbacks with a missing state or nonce are rejected** (#61). The checks compared with `!=`, which passes when both sides are missing.
+- **Request bodies are capped** (#62): 64 KiB for every endpoint except the background upload (10 MB plus overhead). Larger requests get a `413`.
+- **Home Assistant failures after a valid PIN are written to the audit log** (#63), with the failure class but never the URL.
+- **The User-Agent "suspicious request" filter is removed** (#64). It blocked `curl`, `wget`, bots and very short agents with a 403, which stopped nobody determined and broke scripts, Shortcuts and monitors.
+- **Static files can be cached, with revalidation** (#65). Every response was `no-store`, so the background image (up to 10 MB) was re-downloaded on every load. Dynamic and admin responses stay `no-store`.
+
+### 🐛 Bug Fixes
+- **OIDC login denied by group policy now returns 403** instead of 401 (#69, #70, #71): `abort(403)` was swallowed by a broad `except`.
+- **A failed save of the notice or test mode no longer leaves the change in memory** (#70, #71). The next unrelated save used to write it to disk, so an admin told that disabling test mode failed could find it disabled after a restart.
+- **The admin login no longer loops silently** when the browser drops the session cookie (#39, #68).
+
+### ✨ Features
+- **`linux/arm64` image** (#57, #59): `ghcr.io/sloth-on-meth/dooropener` is now published for `linux/amd64` and `linux/arm64` (Raspberry Pi 4/5 and other 64-bit ARM boards; 32-bit ARM is not supported). A pull-request check builds both platforms before merge.
+
+### 🛠️ Technical
+- The users store reuses `atomic_write_text` instead of its own copy of the backup/restore logic (#66).
+
+### 🧪 Tests
+- 336 tests (up from 150), coverage 97%. New suites cover the whole OIDC flow, the admin settings, background, report and migration endpoints, `/open-door` blocking and the Home Assistant call (#67). `app.py` coverage went from 69% to 89%.
+
 ## v[1.14.2] - 2026-10-07
 
 ### 🐛 Bug Fixes
