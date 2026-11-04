@@ -24,6 +24,7 @@ from logging.handlers import RotatingFileHandler
 import filetype
 import pytz
 import requests
+import werkzeug.exceptions
 from flask import (
     Flask,
     abort,
@@ -1206,6 +1207,10 @@ def oidc_callback():
 
         # All users are redirected to the home page after login.
         return redirect(url_for("index"))
+    except werkzeug.exceptions.HTTPException:
+        # abort(401/403) raised above is the intended response; without this the generic handler
+        # below caught it and turned every group denial (403) into a 401.
+        raise
     except Exception as e:
         logger.error(f"OIDC callback error: {e}")
         return abort(401)
