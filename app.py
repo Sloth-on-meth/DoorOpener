@@ -39,6 +39,7 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 
+from atomic_io import atomic_write_text
 from users_store import UsersStore, is_valid_pin, pins_equal
 
 try:
@@ -170,10 +171,6 @@ def save_config() -> None:
     config.ini holds the HA token and admin password, so a crash mid-write must not corrupt it.
     Note: If config.ini is mounted read-only, this will raise a PermissionError or OSError.
     """
-    # Imported here (not at module top) so this doesn't touch the users_store import line that
-    # other in-flight PRs also edit; safe to hoist once they have merged.
-    from atomic_io import atomic_write_text
-
     buf = io.StringIO()
     config.write(buf)
     atomic_write_text(config_path, buf.getvalue())
