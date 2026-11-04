@@ -1064,8 +1064,11 @@ def oidc_callback():
     if not oauth:
         return redirect(url_for("admin"))
     try:
-        # Validate the state parameter to prevent CSRF attacks
-        if request.args.get("state") != session.pop("oidc_state", None):
+        # Validate the state parameter to prevent CSRF attacks. Both values must be present:
+        # a plain `!=` would accept a callback with no state when the session has none either.
+        expected_state = session.pop("oidc_state", None)
+        received_state = request.args.get("state")
+        if not expected_state or not received_state or not hmac.compare_digest(received_state, expected_state):
             abort(401, "Invalid state")
 
         # Authorize the access token from the OIDC provider
@@ -1083,8 +1086,15 @@ def oidc_callback():
             except Exception:
                 claims = {}
 
-        # Validate the nonce value to prevent replay attacks
-        if claims.get("nonce") != session.pop("oidc_nonce", None):
+        # Validate the nonce value to prevent replay attacks (both sides must be present, as above)
+        expected_nonce = session.pop("oidc_nonce", None)
+        received_nonce = claims.get("nonce")
+        if (
+            not expected_nonce
+            or not isinstance(received_nonce, str)
+            or not received_nonce
+            or not hmac.compare_digest(received_nonce, expected_nonce)
+        ):
             abort(401, "Invalid nonce")
 
         # Verify the ID token signature and claims
