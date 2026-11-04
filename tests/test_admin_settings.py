@@ -202,9 +202,16 @@ def test_reset_copy_failure_is_a_500(bg):
     assert bg.client.delete("/admin/background", headers=bg.csrf).status_code == 500
 
 
-def test_custom_flag_is_false_when_the_current_image_cannot_be_read(bg):
+def test_custom_flag_is_true_when_the_current_image_is_missing_so_reset_can_restore_it(bg):
+    """A saved default with no current image is not 'the default in place': report it as custom.
+
+    That keeps "reset to default" available, and resetting is exactly what restores the file.
+    """
     (bg.static / "background_default.jpg").write_bytes(JPEG)  # default exists, background.jpg does not
-    assert bg.client.get("/admin/background").get_json() == {"custom": True}  # differs from a missing file
+    assert bg.client.get("/admin/background").get_json() == {"custom": True}
+    assert bg.client.delete("/admin/background", headers=bg.csrf).status_code == 200
+    assert (bg.static / "background.jpg").read_bytes() == JPEG
+    assert bg.client.get("/admin/background").get_json() == {"custom": False}
 
 
 # --- problem reports --------------------------------------------------------------------------
