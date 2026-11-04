@@ -1181,6 +1181,28 @@ def oidc_callback():
         return abort(401)
 
 
+_warned_secure_cookie_over_http = False
+
+
+def _warn_if_secure_cookie_over_http():
+    """Log, once per process, that a login arrived over plain HTTP while the session cookie is Secure.
+
+    Browsers refuse to store a Secure cookie received over HTTP (outside localhost), so the login
+    looks successful here but the dashboard keeps returning to the login page. Without this line
+    nothing on the server hints at why.
+    """
+    global _warned_secure_cookie_over_http
+    if _warned_secure_cookie_over_http or not app.config.get("SESSION_COOKIE_SECURE") or request.is_secure:
+        return
+    _warned_secure_cookie_over_http = True
+    logger.warning(
+        "Admin login over plain HTTP while SESSION_COOKIE_SECURE=true: browsers do not store Secure cookies "
+        "over HTTP, so the admin dashboard will keep returning to the login page. Serve DoorOpener over HTTPS, "
+        "make sure your reverse proxy sends X-Forwarded-Proto: https, or set SESSION_COOKIE_SECURE=false on a "
+        "trusted network."
+    )
+
+
 @app.route("/admin/auth", methods=["POST"])
 def admin_auth():
     """Authenticate admin password with progressive delays and temporary blocking.
@@ -1258,6 +1280,7 @@ def admin_auth():
         session["admin_authenticated"] = True
         session["admin_login_time"] = now.isoformat()
         session["admin_csrf_token"] = secrets.token_hex(32)
+        _warn_if_secure_cookie_over_http()
 
         # Set session to be permanent if remember_me is checked
         if remember_me:

@@ -953,7 +953,32 @@
             });
             const data = await res.json();
             if (data.status === 'success') {
-                window.location.reload();
+                // The password was accepted, but the login lives in a session cookie. If the browser
+                // refuses to keep it (typically a Secure cookie on a plain-HTTP page) a reload would
+                // just show this form again with no explanation, so confirm the session first.
+                let sessionKept = true;
+                try {
+                    const check = await fetch('/admin/check-auth', {
+                        credentials: 'same-origin',
+                        cache: 'no-store'
+                    });
+                    sessionKept = !!(await check.json()).authenticated;
+                } catch (e) {
+                    sessionKept = true; // cannot tell: fall back to the normal reload
+                }
+                if (sessionKept) {
+                    window.location.reload();
+                } else {
+                    const local = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
+                    errorDiv.textContent = (window.location.protocol === 'http:' && !local)
+                        ? 'Password accepted, but your browser did not keep the login session. This page is '
+                          + 'loaded over plain HTTP and the session cookie is marked Secure, which browsers refuse '
+                          + 'to store over HTTP. Open DoorOpener over HTTPS (for example behind a reverse proxy), '
+                          + 'or on a trusted network set SESSION_COOKIE_SECURE=false and restart the container.'
+                        : 'Password accepted, but your browser did not keep the login session. Check that cookies '
+                          + 'are enabled for this site and that your reverse proxy forwards X-Forwarded-Proto.';
+                    errorDiv.style.display = 'block';
+                }
             } else {
                 errorDiv.textContent = 'Invalid admin password';
                 errorDiv.style.display = 'block';
