@@ -34,6 +34,12 @@ if [ "$(id -u)" = "0" ]; then
   chown -R "${PUID}:${PGID}" "${LOG_DIR}" 2>/dev/null || true
   chmod -R g+rwX "${LOG_DIR}" 2>/dev/null || true
 
+  # An explicitly configured background directory (uploaded backgrounds) must be writable too.
+  if [ -n "${DOOROPENER_BACKGROUND_DIR:-}" ]; then
+    mkdir -p "${DOOROPENER_BACKGROUND_DIR}" || true
+    chown -R "${PUID}:${PGID}" "${DOOROPENER_BACKGROUND_DIR}" 2>/dev/null || true
+  fi
+
   apply_umask
 
   # Drop privileges to app user for the main process

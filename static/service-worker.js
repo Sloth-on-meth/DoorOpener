@@ -1,5 +1,5 @@
 /* DoorOpener Service Worker */
-const CACHE_VERSION = 'v3'; // bump on every deploy to bust stale caches
+const CACHE_VERSION = 'v4'; // bump on every deploy to bust stale caches
 const CACHE_NAME = `dooropener-cache-${CACHE_VERSION}`;
 const ASSETS = [
   '/',
@@ -40,6 +40,23 @@ self.addEventListener('fetch', (event) => {
         caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone));
         return res;
       }).catch(() => caches.match(req))
+    );
+    return;
+  }
+
+  // The admin can replace the background without changing its URL, so never serve a cached copy
+  // while the network works (cache-first would keep showing the old image after an upload). The
+  // cache entry is keyed without the query string, so the admin preview's ?t=... doesn't pile up.
+  if (url.pathname === '/static/background.jpg') {
+    const key = '/static/background.jpg';
+    event.respondWith(
+      fetch(req).then((res) => {
+        if (res.ok) {
+          const resClone = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(key, resClone));
+        }
+        return res;
+      }).catch(() => caches.match(key))
     );
     return;
   }

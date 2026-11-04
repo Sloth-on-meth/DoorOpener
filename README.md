@@ -193,7 +193,7 @@ The admin panel includes a **Public Notice** field. Whatever you write there is 
 
 ## Background Image
 
-Upload a custom background image (JPEG, PNG, GIF, or WebP, max 10 MB) from the admin panel. The original default background is preserved and can be restored at any time with the **Reset** button.
+Upload a custom background image (JPEG, PNG, GIF, or WebP, max 10 MB) from the admin panel. The original default background is preserved and can be restored at any time with the **Reset** button. Uploaded images are stored in `logs/background/` (so they survive container updates through the existing `./logs` volume), or in `DOOROPENER_BACKGROUND_DIR` if you set it; the bundled default is never modified.
 
 ---
 
