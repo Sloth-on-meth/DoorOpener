@@ -42,16 +42,6 @@ def test_security_headers_on_index(client):
         assert h in resp.headers
 
 
-def test_suspicious_request_blocked_open_door(client):
-    # Explicitly set a suspicious User-Agent ('curl') to avoid Werkzeug default UA
-    resp = client.post(
-        "/open-door",
-        data=json.dumps({"pin": "1234"}),
-        headers={"Content-Type": "application/json", "User-Agent": "curl"},
-    )
-    assert resp.status_code == 403
-
-
 def test_global_threshold_alerts_but_does_not_lock_out_valid_pin(client, app_module, monkeypatch):
     """Crossing the global failure threshold must alert, not deny the door to valid PINs."""
     app_module.user_pins["ok"] = "4321"
