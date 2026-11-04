@@ -227,6 +227,10 @@ When OIDC is enabled, a **Login with SSO** button appears on the keypad. Authent
 
 > If running behind a reverse proxy over HTTP for local dev, set `SESSION_COOKIE_SECURE=false` so the browser sends the session cookie.
 
+### Troubleshooting: the admin page reloads and asks for the password again
+
+The password was accepted but your browser did not keep the login session. This happens when DoorOpener is opened over **plain HTTP** (for example `http://192.168.1.10:6532` on a NAS) while `SESSION_COOKIE_SECURE=true` (the default): browsers refuse to store a `Secure` cookie over HTTP, except on `localhost`. Either open it over HTTPS (for example behind a reverse proxy that sends `X-Forwarded-Proto: https`), or, on a network you trust, set `SESSION_COOKIE_SECURE=false` in `.env` and restart. The login page now says this when it happens, and the server logs a warning on the first such login.
+
 ---
 
 ## API
