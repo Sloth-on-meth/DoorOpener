@@ -164,6 +164,30 @@ config_path = os.path.join(os.path.dirname(__file__), "config.ini")
 config.read(config_path)
 
 
+def set_config_option_and_save(section: str, option: str, value) -> None:
+    """Set (or, with value=None, remove) one option and persist it.
+
+    If saving fails, the in-memory config is put back as it was before raising. Otherwise the
+    next unrelated save (another setting, a user migration) would silently write a change the
+    admin was told had failed.
+    """
+    if not config.has_section(section):
+        config.add_section(section)
+    previous = config.get(section, option, fallback=None)
+    if value is None:
+        config.remove_option(section, option)
+    else:
+        config.set(section, option, value)
+    try:
+        save_config()
+    except OSError:
+        if previous is None:
+            config.remove_option(section, option)
+        else:
+            config.set(section, option, previous)
+        raise
+
+
 def save_config() -> None:
     """Persist the current in-memory config to disk without risking a truncated file.
 
@@ -1352,14 +1376,8 @@ def admin_notice_set():
         return jsonify({"error": "Invalid CSRF token"}), 403
     data = request.get_json(silent=True) or {}
     notice = data.get("notice", "").strip()
-    if not config.has_section("server"):
-        config.add_section("server")
-    if notice:
-        config.set("server", "notice", notice)
-    else:
-        config.remove_option("server", "notice")
     try:
-        save_config()
+        set_config_option_and_save("server", "notice", notice or None)
     except OSError as e:
         logger.error(f"Failed to save config: {e}")
         return jsonify({"error": "Could not save config"}), 500
@@ -1386,11 +1404,8 @@ def admin_test_mode_set():
     if "enabled" not in data:
         return jsonify({"error": "Missing 'enabled' field"}), 400
     new_value = bool(data["enabled"])
-    if not config.has_section("server"):
-        config.add_section("server")
-    config.set("server", "test_mode", "true" if new_value else "false")
     try:
-        save_config()
+        set_config_option_and_save("server", "test_mode", "true" if new_value else "false")
     except OSError as e:
         logger.error(f"Failed to save config: {e}")
         return jsonify({"error": "Could not save config"}), 500
