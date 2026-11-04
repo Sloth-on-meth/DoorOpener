@@ -1601,14 +1601,21 @@
     async function fillGeneratedPin(card) {
         const input = card.querySelector('#um_pin');
         const hint = card.querySelector('#um_pin_hint');
+        const confirmBtn = card.querySelector('#modalOk');
         const length = card.querySelector('#um_pinlen').value;
+        // Only the latest click may update the form: an older, slower response must not overwrite it.
+        const requestId = (card.pinRequestId || 0) + 1;
+        card.pinRequestId = requestId;
         hint.textContent = '';
+        // Block saving while a PIN is on its way, so what is saved is what the admin is looking at.
+        if (confirmBtn) confirmBtn.disabled = true;
         try {
             const res = await fetch('/admin/generate-pin?length=' + encodeURIComponent(length), {
                 credentials: 'same-origin',
                 cache: 'no-store'
             });
             const data = await res.json().catch(() => ({}));
+            if (requestId !== card.pinRequestId) return;
             if (!res.ok || !data.pin) {
                 hint.textContent = data.error || 'Could not generate a PIN';
                 return;
@@ -1618,7 +1625,10 @@
             hint.textContent = 'Generated a ' + data.pin.length + '-digit PIN that no one else uses. '
                 + 'Write it down before saving.';
         } catch (e) {
+            if (requestId !== card.pinRequestId) return;
             hint.textContent = 'Could not generate a PIN';
+        } finally {
+            if (confirmBtn && requestId === card.pinRequestId) confirmBtn.disabled = false;
         }
     }
 
@@ -1642,7 +1652,10 @@
             if (!username) { alert('Username required'); throw new Error(); }
             if (!/^[-_.A-Za-z0-9]{1,32}$/.test(username)) { alert('Invalid username'); throw new Error(); }
             if (!/^\d{4,8}$/.test(pin)) { alert('PIN must be 4-8 digits'); throw new Error(); }
-            await addUser(username, pin);
+            // No new PIN while the one being saved is in flight.
+            const generateBtn = card.querySelector('#um_generate');
+            generateBtn.disabled = true;
+            try { await addUser(username, pin); } finally { generateBtn.disabled = false; }
         });
         card.querySelector('#um_generate').addEventListener('click', () => fillGeneratedPin(card));
     }

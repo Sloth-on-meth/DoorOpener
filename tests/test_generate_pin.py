@@ -68,10 +68,48 @@ def test_generator_never_returns_a_taken_or_trivial_pin(env):
 
 def test_generator_is_random_and_uses_the_secrets_module(env):
     calls = []
-    real = env.app.secrets.choice
-    env.mp.setattr(env.app.secrets, "choice", lambda seq: calls.append(1) or real(seq))
+    real = env.app.secrets.randbelow
+    env.mp.setattr(env.app.secrets, "randbelow", lambda n: calls.append(n) or real(n))
     pins = {env.app.generate_unused_pin(6, set()) for _ in range(40)}
     assert calls and len(pins) > 30
+
+
+@pytest.mark.parametrize("upper, taken", [(20, [0, 3, 4, 19]), (10, [0]), (10, [9]), (10, [3, 4, 5]), (6, [])])
+def test_nth_free_number_matches_a_brute_force_listing(env, upper, taken):
+    free = [n for n in range(upper) if n not in taken]
+    assert [env.app._nth_free_number(taken, k) for k in range(len(free))] == free
+    assert list(env.app._free_numbers(taken, upper)) == free
+
+
+@pytest.mark.parametrize("length", [5, 6, 7, 8])
+def test_the_one_free_pin_is_found_at_every_length(env, length):
+    """A near-full space at lengths 6-8 used to return None after 1000 random misses."""
+    free = "7391" + "0" * (length - 4)
+    space_taken = {f"{n:0{length}d}" for n in range(10**length)} if length <= 5 else None
+    if space_taken is not None:
+        assert env.app.generate_unused_pin(length, space_taken - {free}) == free
+        return
+    # 10**6..10**8 entries would be too big to build: take every PIN in the first and last thousands
+    # of the space plus a spread in between, and check the answer is free and uniformly reachable.
+    taken = {f"{n:0{length}d}" for n in range(1000)} | {f"{n:0{length}d}" for n in range(10**length - 1000, 10**length)}
+    seen = {env.app.generate_unused_pin(length, taken) for _ in range(200)}
+    assert not (seen & taken) and len(seen) > 150
+
+
+def test_every_free_pin_is_reachable_and_roughly_equally_likely(env):
+    taken = {f"{n:04d}" for n in range(10000)} - {"2580", "7391", "4826"}
+    counts = {}
+    for _ in range(900):
+        pin = env.app.generate_unused_pin(4, taken)
+        counts[pin] = counts.get(pin, 0) + 1
+    assert set(counts) == {"2580", "7391", "4826"}
+    assert all(200 < c < 400 for c in counts.values()), counts  # ~300 each
+
+
+def test_none_only_when_every_free_pin_is_trivial(env):
+    nearly_full = {f"{n:04d}" for n in range(10000)}
+    assert env.app.generate_unused_pin(4, nearly_full - {"1111", "1234"}) is None  # only trivial ones left
+    assert env.app.generate_unused_pin(4, nearly_full - {"1111", "1234", "5073"}) == "5073"
 
 
 def test_a_nearly_full_pin_space_still_yields_the_one_free_pin(env):
@@ -170,6 +208,7 @@ const els = {
   '#um_pin': { value: '', type: 'password' },
   '#um_pin_hint': { textContent: '' },
   '#um_pinlen': { value: scenario.length },
+  '#modalOk': { disabled: false },
 };
 const card = { querySelector: (sel) => els[sel] };
 const calls = [];
@@ -181,6 +220,7 @@ const fetch = async (url) => {
 const fill = new Function('fetch', src + '; return fillGeneratedPin;')(fetch);
 fill(card).then(() => console.log(JSON.stringify({
   value: els['#um_pin'].value, type: els['#um_pin'].type, hint: els['#um_pin_hint'].textContent, calls,
+  confirmDisabled: els['#modalOk'].disabled,
 })));
 """
 
@@ -234,3 +274,100 @@ def test_button_shows_the_server_error_and_leaves_the_field_alone():
 def test_button_survives_a_network_failure():
     out = run_fill(network="throw")
     assert out["value"] == "" and out["hint"] == "Could not generate a PIN"
+
+
+OVERLAP_HARNESS = r"""
+const fs = require('fs');
+const { src, order, waitAll } = JSON.parse(fs.readFileSync(0, 'utf8'));
+const els = {
+  '#um_pin': { value: '', type: 'password' },
+  '#um_pin_hint': { textContent: '' },
+  '#um_pinlen': { value: '6' },
+  '#modalOk': { disabled: false },
+};
+const card = { querySelector: (sel) => els[sel] };
+const pending = [];
+const fetch = () => new Promise((resolve) => pending.push(resolve));
+const fill = new Function('fetch', src + '; return fillGeneratedPin;')(fetch);
+const respond = (i, body, ok = true) => pending[i]({ ok, json: async () => body });
+const tick = () => new Promise((r) => setTimeout(r, 5));
+(async () => {
+  const trace = {};
+  const first = fill(card);   // click 1
+  const second = fill(card);  // click 2 while 1 is still pending
+  trace.confirmDisabledWhilePending = els['#modalOk'].disabled;
+  for (const [i, body, ok] of order) { respond(i, body, ok); await tick(); }
+  if (waitAll) await Promise.all([first, second]);
+  console.log(JSON.stringify({ ...trace, value: els['#um_pin'].value, hint: els['#um_pin_hint'].textContent,
+    confirmDisabledAfter: els['#modalOk'].disabled }));
+})();
+"""
+
+
+def run_overlap(order, wait_all=True):
+    res = subprocess.run(
+        ["node", "-e", OVERLAP_HARNESS],
+        input=json.dumps({"src": _fill_source(), "order": order, "waitAll": wait_all}),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert res.returncode == 0, res.stderr
+    return json.loads(res.stdout.strip().splitlines()[-1])
+
+
+@needs_node
+def test_save_is_blocked_while_a_pin_is_being_generated_and_freed_afterwards():
+    out = run_fill(body={"pin": "482619"})
+    assert out["confirmDisabled"] is False  # re-enabled once the response is in
+    out = run_fill(ok=False, body={"error": "nope"})
+    assert out["confirmDisabled"] is False  # ...and after a failure too
+    out = run_fill(network="throw")
+    assert out["confirmDisabled"] is False
+
+
+@needs_node
+def test_an_older_slower_response_cannot_overwrite_the_latest_one():
+    # click 1 then click 2; click 2's answer arrives first, click 1's (stale) arrives last
+    out = run_overlap([[1, {"pin": "222222"}, True], [0, {"pin": "111111"}, True]])
+    assert out["value"] == "222222"
+    assert out["confirmDisabledWhilePending"] is True and out["confirmDisabledAfter"] is False
+
+
+@needs_node
+def test_a_stale_error_cannot_replace_the_latest_hint_either():
+    out = run_overlap([[1, {"pin": "333333"}, True], [0, {"error": "old failure"}, False]])
+    assert out["value"] == "333333" and "old failure" not in out["hint"]
+
+
+@needs_node
+def test_the_confirm_button_stays_blocked_until_the_latest_request_finishes():
+    # click 1's (stale) answer arrives while click 2 is still pending: nothing changes, Save stays blocked
+    out = run_overlap([[0, {"pin": "111111"}, True]], wait_all=False)
+    assert out["value"] == "" and out["confirmDisabledAfter"] is True
+
+
+def _function_source(name):
+    html = open(os.path.join(ROOT, "templates", "admin.html"), encoding="utf-8").read()
+    start = html.index(f"function {name}(")
+    depth, i = 0, html.index("{", start)
+    for j in range(i, len(html)):
+        depth += {"{": 1, "}": -1}.get(html[j], 0)
+        if depth == 0:
+            return html[start : j + 1]
+    raise AssertionError(f"{name}() not terminated")
+
+
+def test_the_generate_button_is_wired_up_in_the_add_user_dialog():
+    """Cheap guard for the glue the Node tests don't reach (no DOM library in this repo): the dialog
+    has the button, keeps the card showModal returns, and its click handler calls fillGeneratedPin."""
+    src = _function_source("openAddUser")
+    assert 'id="um_generate"' in src and 'id="um_pinlen"' in src and 'id="um_pin_hint"' in src
+    assert "const card = showModal(" in src
+    assert "card.querySelector('#um_generate').addEventListener('click', () => fillGeneratedPin(card))" in src
+    assert "return card;" in _function_source("showModal")
+
+
+def test_generate_is_disabled_while_a_save_is_in_flight():
+    src = _function_source("openAddUser")
+    assert "generateBtn.disabled = true" in src and "finally { generateBtn.disabled = false; }" in src

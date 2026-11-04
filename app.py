@@ -1939,27 +1939,56 @@ def _is_trivial_pin(pin: str) -> bool:
     return steps == {1} or steps == {-1}
 
 
+def _nth_free_number(taken_sorted, n: int) -> int:
+    """The n-th (0-based) non-negative integer that is not in `taken_sorted` (ascending, unique).
+
+    Walks the sorted taken values once: every taken value at or below the running candidate pushes
+    the candidate up by one. Exact and uniform over the free numbers, and cost grows with the
+    number of taken PINs, not with the size of the PIN space.
+    """
+    for t in taken_sorted:
+        if t <= n:
+            n += 1
+        else:
+            break
+    return n
+
+
+def _free_numbers(taken_sorted, upper: int):
+    """Yield every integer in [0, upper) that is not in `taken_sorted`, in order."""
+    previous = -1
+    for t in (*taken_sorted, upper):
+        yield from range(previous + 1, t)
+        previous = t
+
+
 def generate_unused_pin(length: int, taken) -> "str | None":
     """A random PIN of `length` digits that is not in `taken` and not trivially guessable.
 
-    Uses `secrets` (a PIN is a credential). Returns None only if no such PIN is left, which needs a
-    short length and an almost full PIN space.
+    Uses `secrets` (a PIN is a credential) and is uniform over the PINs that are actually free, at
+    any length. Returns None only when every free PIN is a trivial one, i.e. the space is full.
     """
     if not PIN_MIN_LENGTH <= length <= PIN_MAX_LENGTH:
         raise ValueError("invalid PIN length")
-    for _ in range(1000):
-        pin = "".join(secrets.choice("0123456789") for _ in range(length))
-        if pin not in taken and not _is_trivial_pin(pin):
+    space = 10**length
+    taken_sorted = sorted({int(t) for t in taken if len(t) == length and t.isascii() and t.isdigit()})
+    free = space - len(taken_sorted)
+    if free <= 0:
+        return None
+    for _ in range(200):
+        pin = f"{_nth_free_number(taken_sorted, secrets.randbelow(free)):0{length}d}"
+        if not _is_trivial_pin(pin):
             return pin
-    if length <= 5:  # a small space that is nearly full: pick from what is actually left
-        free = [
-            pin
-            for pin in (f"{n:0{length}d}" for n in range(10**length))
-            if pin not in taken and not _is_trivial_pin(pin)
-        ]
-        if free:
-            return secrets.choice(free)
-    return None
+    # 200 draws all landed on trivial PINs: only plausible when the few PINs left are trivial ones.
+    # List what is left (cheap in that situation) and pick a non-trivial one if there is any.
+    candidates = []
+    for n in _free_numbers(taken_sorted, space):
+        pin = f"{n:0{length}d}"
+        if not _is_trivial_pin(pin):
+            candidates.append(pin)
+            if len(candidates) >= 1000:
+                break
+    return secrets.choice(candidates) if candidates else None
 
 
 @app.route("/admin/generate-pin", methods=["GET"])
