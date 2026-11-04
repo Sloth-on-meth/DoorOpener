@@ -507,9 +507,15 @@ def add_security_headers(response):
         "object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
     )
 
-    # Prevent caching of dynamic/admin JSON endpoints to avoid stale auth state
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
+    if request.path.startswith("/static/"):
+        # Static files (the background image can be 10 MB) may be cached, but must be revalidated:
+        # the admin can replace background.jpg without changing its URL. Flask sends an ETag and
+        # Last-Modified, so an unchanged file costs a 304 instead of a full download.
+        response.headers["Cache-Control"] = "no-cache"
+    else:
+        # Prevent caching of dynamic/admin JSON endpoints to avoid stale auth state
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
     return response
 
 
