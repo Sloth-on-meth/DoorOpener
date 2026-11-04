@@ -140,6 +140,8 @@ max_attempts = 5               # failed attempts per IP before block
 block_time_minutes = 5
 max_global_attempts_per_hour = 50
 session_max_attempts = 3       # failed attempts per session before block
+admin_session_hours = 12       # admin dashboard session ends this long after login
+admin_remember_days = 30       # ...or this long when "remember me" is ticked
 
 [pushbullet]
 # api_token = your_pushbullet_token   # enables problem-report button on keypad

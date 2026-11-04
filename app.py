@@ -368,6 +368,10 @@ MAX_ATTEMPTS = config.getint("security", "max_attempts", fallback=5)
 BLOCK_TIME = timedelta(minutes=config.getint("security", "block_time_minutes", fallback=5))
 MAX_GLOBAL_ATTEMPTS_PER_HOUR = config.getint("security", "max_global_attempts_per_hour", fallback=50)
 SESSION_MAX_ATTEMPTS = config.getint("security", "session_max_attempts", fallback=3)
+# Admin sessions are stateless signed cookies, so the server enforces their age itself rather than
+# trusting the cookie's expiry (a stolen cookie would otherwise stay valid for its full lifetime).
+ADMIN_SESSION_MAX_AGE = timedelta(hours=config.getint("security", "admin_session_hours", fallback=12))
+ADMIN_REMEMBER_MAX_AGE = timedelta(days=config.getint("security", "admin_remember_days", fallback=30))
 
 # --- Background image paths ---
 STATIC_DIR = os.path.join(app.root_path, "static")
@@ -1026,7 +1030,7 @@ def open_door():
 
 @app.route("/admin")
 def admin():
-    is_authenticated = bool(session.get("admin_authenticated"))
+    is_authenticated = _admin_session_valid()
     return render_template(
         "admin.html",
         oidc_enabled=bool(oauth),
@@ -1261,9 +1265,9 @@ def admin_auth():
 
         # Set session to be permanent if remember_me is checked
         if remember_me:
+            # Cookie lifetime comes from PERMANENT_SESSION_LIFETIME; the server-side cap is
+            # ADMIN_REMEMBER_MAX_AGE (see _admin_session_valid).
             session.permanent = True
-            # Set cookie to expire in 30 days
-            app.permanent_session_lifetime = timedelta(days=30)
         else:
             session.permanent = False
             # Session expires when browser closes
@@ -1316,7 +1320,7 @@ def admin_auth():
 @app.route("/admin/check-auth", methods=["GET"])
 def admin_check_auth():
     """Check if admin is currently authenticated"""
-    if session.get("admin_authenticated"):
+    if _admin_session_valid():
         login_time = session.get("admin_login_time")
         csrf_token = session.get("admin_csrf_token")
         return jsonify({"authenticated": True, "login_time": login_time, "csrf_token": csrf_token})
@@ -1329,9 +1333,7 @@ def admin_logout():
     """Logout admin user"""
     if not _check_admin_csrf():
         return jsonify({"error": "Invalid CSRF token"}), 403
-    session.pop("admin_authenticated", None)
-    session.pop("admin_login_time", None)
-    session.pop("admin_csrf_token", None)
+    _clear_admin_session()
     session.permanent = False
     return jsonify({"status": "success", "message": "Logged out successfully"})
 
@@ -1543,7 +1545,7 @@ def auth_status():
 def admin_logs():
     """Get parsed log data for admin dashboard"""
     # Check if admin is authenticated
-    if not session.get("admin_authenticated"):
+    if not _require_admin_authenticated():
         return jsonify({"error": "Authentication required"}), 401
 
     try:
@@ -1612,7 +1614,7 @@ def admin_logs_clear():
 
     Body: {"mode": "all" | "test_only"}
     """
-    if not session.get("admin_authenticated"):
+    if not _require_admin_authenticated():
         return jsonify({"error": "Authentication required"}), 401
     if not _check_admin_csrf():
         return jsonify({"error": "Invalid CSRF token"}), 403
@@ -1707,10 +1709,37 @@ def admin_logs_clear():
 # --- Admin: User Management Endpoints ---
 
 
-def _require_admin_authenticated():
+def _clear_admin_session():
+    for key in ("admin_authenticated", "admin_login_time", "admin_csrf_token", "admin_user"):
+        session.pop(key, None)
+
+
+def _admin_session_valid() -> bool:
+    """True if the visitor holds an admin session that has not outlived its maximum age.
+
+    The age is measured from the server-recorded login time: ADMIN_SESSION_MAX_AGE normally,
+    ADMIN_REMEMBER_MAX_AGE for a "remember me" login. A session with a missing, unparsable or
+    future-dated login time is treated as expired, and an expired one is cleared.
+    """
     if not session.get("admin_authenticated"):
         return False
+    try:
+        logged_in = datetime.fromisoformat(session.get("admin_login_time"))
+        if logged_in.tzinfo is None:
+            logged_in = logged_in.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        _clear_admin_session()
+        return False
+    age = get_current_time() - logged_in
+    max_age = ADMIN_REMEMBER_MAX_AGE if session.permanent else ADMIN_SESSION_MAX_AGE
+    if age > max_age or age < -timedelta(minutes=1):
+        _clear_admin_session()
+        return False
     return True
+
+
+def _require_admin_authenticated():
+    return _admin_session_valid()
 
 
 def _check_admin_csrf():

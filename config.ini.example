@@ -50,6 +50,10 @@ block_time_minutes = 5
 max_global_attempts_per_hour = 50
 # Maximum failed attempts per session before blocking
 session_max_attempts = 3
+# Admin dashboard sessions end this many hours after login, regardless of cookie expiry
+admin_session_hours = 12
+# ...or this many days when "remember me" is ticked at login
+admin_remember_days = 30
 
 [oidc]
 # Enable in-app OIDC login via Authentik (true/false)
