@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from users_store import UsersStore
+from users_store import UsersStore, UsersStoreError
 
 
 def _readonly_dir_env(target_dir, scratch):
@@ -35,9 +35,9 @@ def _readonly_dir_env(target_dir, scratch):
         return real_copyfile(src, dst, **kw)
 
     return created_in_target, [
-        patch("users_store.tempfile.mkstemp", mkstemp),
-        patch("users_store.os.replace", side_effect=OSError(errno.EXDEV, "cross-device link")),
-        patch("users_store.shutil.copyfile", copyfile),
+        patch("atomic_io.tempfile.mkstemp", mkstemp),
+        patch("atomic_io.os.replace", side_effect=OSError(errno.EXDEV, "cross-device link")),
+        patch("atomic_io.shutil.copyfile", copyfile),
     ]
 
 
@@ -90,7 +90,7 @@ def test_failed_overwrite_restores_the_original_file(tmp_path):
         p.start()
     try:
         with patch("builtins.open", flaky_open):
-            with pytest.raises(OSError):
+            with pytest.raises(UsersStoreError):
                 store.update_user("alice", active=False)
     finally:
         for p in patches:
@@ -99,8 +99,6 @@ def test_failed_overwrite_restores_the_original_file(tmp_path):
 
 
 def test_backup_is_kept_and_named_when_restoring_it_also_fails(tmp_path):
-    from users_store import UsersStoreError
-
     target_dir = tmp_path / "app"
     target_dir.mkdir()
     scratch = tmp_path / "tmp"
@@ -129,7 +127,7 @@ def test_backup_is_kept_and_named_when_restoring_it_also_fails(tmp_path):
     for p in patches:
         p.start()
     try:
-        with patch("builtins.open", flaky_open), patch("users_store.shutil.copyfile", copyfile):
+        with patch("builtins.open", flaky_open), patch("atomic_io.shutil.copyfile", copyfile):
             with pytest.raises(UsersStoreError) as exc:
                 store.update_user("alice", active=False)
     finally:
@@ -170,8 +168,8 @@ def test_backup_is_not_group_or_world_readable_even_if_users_json_is(tmp_path):
     for p in patches:
         p.start()
     try:
-        with patch("builtins.open", flaky_open), patch("users_store.shutil.copyfile", real_copyfile):
-            with pytest.raises(OSError):
+        with patch("builtins.open", flaky_open), patch("atomic_io.shutil.copyfile", real_copyfile):
+            with pytest.raises(UsersStoreError):
                 store.update_user("alice", active=False)
     finally:
         for p in patches:

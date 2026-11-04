@@ -2,26 +2,19 @@ import copy
 import hmac
 import json
 import os
-import shutil
-import tempfile
 from datetime import datetime, timezone
 from functools import wraps
 from inspect import isfunction
 from threading import RLock
 from typing import Any, Dict, Optional
 
+from atomic_io import atomic_write_text
+
 ISO_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 
 
 class UsersStoreError(RuntimeError):
     """Raised when the on-disk users store cannot be safely read or written."""
-
-
-def _remove_quietly(path: str) -> None:
-    try:
-        os.remove(path)
-    except OSError:
-        pass
 
 
 def _now_iso() -> str:
@@ -99,81 +92,12 @@ class UsersStore:
         self._remember_good()
 
     def _write_store(self) -> None:
-        dir_path = os.path.dirname(self.path)
-        os.makedirs(dir_path, exist_ok=True)
-        # Prefer writing the temp file next to the target (same filesystem = atomic
-        # rename). Fall back to /tmp when the app directory can't take a new file,
-        # e.g. when users.json is a single-file Docker bind-mount, or the primary
-        # filesystem is out of space/inodes.
-        tmp_path = None
-        for tmp_dir in (dir_path, tempfile.gettempdir()):
-            try:
-                fd, tmp_path = tempfile.mkstemp(dir=tmp_dir, suffix=".tmp")
-                break
-            except OSError:
-                continue
-        else:
-            raise UsersStoreError(f"Cannot create temp file in {dir_path} or {tempfile.gettempdir()}")
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(self.data, f, ensure_ascii=False, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            try:
-                # Same filesystem: atomic rename, no window where the file is
-                # missing or half-written.
-                os.replace(tmp_path, self.path)
-            except OSError:
-                # Cross-device (e.g. users.json is a single-file Docker bind mount): os.replace()
-                # can't rename here, so back up the existing file before overwriting it. If the
-                # copy below fails partway (disk fills up, process killed), restore from the
-                # backup instead of leaving users.json truncated.
-                #
-                # The backup goes beside the temp file, NOT beside users.json: with a single-file
-                # mount the app directory (/app) is typically root-owned and can't take new files,
-                # which is exactly why the temp file fell back to /tmp (see #41).
-                backup_path = None
-                if os.path.exists(self.path):
-                    bfd, backup_path = tempfile.mkstemp(dir=os.path.dirname(tmp_path), suffix=".bak")
-                    os.close(bfd)
-                    try:
-                        # copyfile, not copy2: copy2 also copies permission bits, which would
-                        # turn the 0600 backup (made by mkstemp) into a copy of users.json's mode,
-                        # e.g. a world-readable file of PINs in the shared temp directory.
-                        shutil.copyfile(self.path, backup_path)
-                    except Exception:
-                        _remove_quietly(backup_path)
-                        raise
-                try:
-                    with open(tmp_path, "r", encoding="utf-8") as src:
-                        content = src.read()
-                    with open(self.path, "w", encoding="utf-8") as dst:
-                        dst.write(content)
-                        dst.flush()
-                        os.fsync(dst.fileno())
-                except Exception:
-                    if backup_path:
-                        # If restoring fails too, the backup is deliberately kept (it is then the
-                        # only intact copy) and the error says where it is. copyfile keeps
-                        # users.json's own permission bits.
-                        try:
-                            shutil.copyfile(backup_path, self.path)
-                        except Exception as restore_err:
-                            raise UsersStoreError(
-                                f"Could not write {self.path} and could not restore it; "
-                                f"the previous contents are preserved in {backup_path}"
-                            ) from restore_err
-                        _remove_quietly(backup_path)
-                    raise
-                if backup_path:
-                    _remove_quietly(backup_path)
-                os.remove(tmp_path)
-        except Exception:
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-            raise
+            atomic_write_text(self.path, json.dumps(self.data, ensure_ascii=False, indent=2))
+        except OSError as e:
+            # atomic_write_text does the temp-file / cross-device / backup / restore handling
+            # (shared with config.ini) and puts the location of any retained backup in the message.
+            raise UsersStoreError(f"Cannot write users store at {self.path}: {e}") from e
 
     @staticmethod
     def _merge(data: Dict[str, Any], base_pins: Dict[str, str]) -> Dict[str, str]:
