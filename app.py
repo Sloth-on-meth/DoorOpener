@@ -36,6 +36,7 @@ from flask import (
     session,
     url_for,
 )
+from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 
@@ -379,6 +380,12 @@ BACKGROUND_PATH = os.path.join(STATIC_DIR, "background.jpg")
 BACKGROUND_DEFAULT_PATH = os.path.join(STATIC_DIR, "background_default.jpg")
 ALLOWED_IMAGE_TYPES = {"jpg", "png", "gif", "webp"}
 MAX_BACKGROUND_SIZE = 10 * 1024 * 1024  # 10 MB
+# Request body caps. Every endpoint except the background upload takes a tiny JSON body (a PIN,
+# a password, a short message), so those get a small limit; the upload gets room for its file plus
+# multipart overhead. Without a cap, the unauthenticated endpoints would buffer any body sent.
+MAX_JSON_BODY = 64 * 1024
+MAX_UPLOAD_BODY = MAX_BACKGROUND_SIZE + 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BODY
 
 # Preserve the default background on first run so it can be restored later
 if os.path.exists(BACKGROUND_PATH) and not os.path.exists(BACKGROUND_DEFAULT_PATH):
@@ -598,6 +605,21 @@ def validate_pin_input(pin):
     except Exception as e:
         logger.error(f"Error validating PIN input: {e}")
         return False, None
+
+
+@app.before_request
+def limit_request_body():
+    """Reject oversized request bodies before any view reads them."""
+    limit = MAX_UPLOAD_BODY if request.path == "/admin/background" else MAX_JSON_BODY
+    # Applies to bodies with no Content-Length (chunked) too: Werkzeug enforces it while reading.
+    request.max_content_length = limit
+    if request.content_length is not None and request.content_length > limit:
+        raise RequestEntityTooLarge()
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def handle_request_too_large(_err):
+    return jsonify({"status": "error", "message": "Request body too large"}), 413
 
 
 @app.before_request
@@ -1012,6 +1034,9 @@ def open_door():
                 resp["blocked_until"] = ip_blocked_until[identifier].timestamp()
             return jsonify(resp), 401
 
+    except HTTPException:
+        # e.g. 413 from the body-size cap: let Flask render it instead of logging a 500
+        raise
     except Exception as e:
         try:
             primary_ip, session_id, _ = get_client_identifier()
