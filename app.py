@@ -569,21 +569,6 @@ def _minutes(delta):
     return max(1, int(delta.total_seconds() // 60))
 
 
-def is_request_suspicious():
-    """Detect suspicious request patterns"""
-    # Check for missing or suspicious headers
-    user_agent = request.headers.get("User-Agent", "")
-    if not user_agent or len(user_agent) < 10:
-        return True
-
-    # Check for common bot patterns
-    suspicious_agents = ["curl", "wget", "python-requests", "bot", "crawler"]
-    if any(agent in user_agent.lower() for agent in suspicious_agents):
-        return True
-
-    return False
-
-
 def validate_pin_input(pin):
     try:
         if not isinstance(pin, str):
@@ -799,13 +784,6 @@ def open_door():
     try:
         primary_ip, session_id, identifier = get_client_identifier()
         now = get_current_time()
-
-        # Check for suspicious requests first
-        if is_request_suspicious():
-            log_attempt(
-                "SUSPICIOUS", "Suspicious request detected", primary_ip=primary_ip, session_id=session_id, now=now
-            )
-            return jsonify({"status": "error", "message": "Request blocked"}), 403
 
         # Enforce session-based blocking stored in signed cookie (persists across workers)
         sess_block_ts = session.get("blocked_until_ts")
