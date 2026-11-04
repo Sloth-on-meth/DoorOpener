@@ -42,7 +42,7 @@ def test_cleanup_keeps_blocked_client_state_for_the_full_backoff(monkeypatch):
     app_module.block_strikes["1.2.3.4"] = 5
     # idle for 3 hours: past the old 1h+10m TTL, well inside the 24h block
     app_module._rate_limit_last_seen["1.2.3.4"] = time.monotonic() - 3 * 3600
-    monkeypatch.setattr(app_module, "_last_cleanup_mono", 0.0)
+    monkeypatch.setattr(app_module, "_last_cleanup_mono", float("-inf"))  # not 0.0: monotonic() counts from boot
     app_module._cleanup_rate_limit_state()
     assert app_module.ip_blocked_until.get("1.2.3.4")
     assert app_module.block_strikes.get("1.2.3.4") == 5

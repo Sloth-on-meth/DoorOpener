@@ -274,7 +274,7 @@ def test_admin_login_ip_block_applies_across_sessions(env):
 def test_cleanup_evicts_idle_clients_but_keeps_recent_ones_and_prunes_reports(env):
     app = env.app
     now_mono = time.monotonic()
-    env.mp.setattr(app, "_last_cleanup_mono", 0.0)
+    env.mp.setattr(app, "_last_cleanup_mono", float("-inf"))  # not 0.0: monotonic() counts from boot
     env.mp.setattr(app, "_rate_limit_last_seen", {"idle": now_mono - 10**6, "recent": now_mono})
     app.ip_failed_attempts.update({"idle": 3, "recent": 2})
     app.block_strikes.update({"idle": 2})
