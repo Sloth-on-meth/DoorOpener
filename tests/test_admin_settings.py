@@ -151,12 +151,15 @@ def test_a_failed_notice_save_is_rolled_back_too(env):
 
 @pytest.fixture
 def bg(env):
+    """Bundled static dir and the upload dir are separate temp dirs; only the upload dir is writable."""
     static = env.tmp / "static"
     static.mkdir()
+    (static / "background_default.jpg").write_bytes(JPEG + b"default")
+    uploads = env.tmp / "uploads" / "background"  # does not exist yet: the app must create it
     env.mp.setattr(env.app, "STATIC_DIR", str(static))
-    env.mp.setattr(env.app, "BACKGROUND_PATH", str(static / "background.jpg"))
     env.mp.setattr(env.app, "BACKGROUND_DEFAULT_PATH", str(static / "background_default.jpg"))
-    env.static = static
+    env.mp.setattr(env.app, "BACKGROUND_DIR", str(uploads))
+    env.static, env.uploads = static, uploads
     return env
 
 
@@ -169,6 +172,10 @@ def _upload(env, data, name="bg.png", headers=True):
     )
 
 
+def _served(env):
+    return env.client.get("/static/background.jpg")
+
+
 def test_background_endpoints_need_admin_and_csrf(bg, anon):
     assert anon.get("/admin/background").status_code == 401
     assert anon.post("/admin/background").status_code == 401
@@ -177,24 +184,48 @@ def test_background_endpoints_need_admin_and_csrf(bg, anon):
     assert bg.client.delete("/admin/background").status_code == 403
 
 
-@pytest.mark.parametrize("data", [PNG, JPEG, GIF, WEBP], ids=["png", "jpeg", "gif", "webp"])
-def test_valid_images_are_accepted_and_replace_the_background(bg, data):
+@pytest.mark.parametrize(
+    "data, ext, mimetype",
+    [(PNG, "png", "image/png"), (JPEG, "jpg", "image/jpeg"), (GIF, "gif", "image/gif"), (WEBP, "webp", "image/webp")],
+    ids=["png", "jpeg", "gif", "webp"],
+)
+def test_valid_images_are_accepted_stored_in_the_upload_dir_and_served(bg, data, ext, mimetype):
     assert _upload(bg, data).status_code == 200
-    assert (bg.static / "background.jpg").read_bytes() == data
-    assert [p.name for p in bg.static.iterdir()] == ["background.jpg"]  # no temp file left behind
+    assert (bg.uploads / f"custom_background.{ext}").read_bytes() == data
+    assert [p.name for p in bg.uploads.iterdir()] == [f"custom_background.{ext}"]  # no temp file left behind
+    r = _served(bg)
+    assert r.status_code == 200 and r.data == data and r.mimetype == mimetype
+
+
+def test_the_bundled_static_directory_is_never_written_to(bg):
+    before = sorted(p.name for p in bg.static.iterdir())
+    _upload(bg, PNG)
+    bg.client.delete("/admin/background", headers=bg.csrf)
+    assert sorted(p.name for p in bg.static.iterdir()) == before
+
+
+def test_default_is_served_until_something_is_uploaded(bg):
+    r = _served(bg)
+    assert r.status_code == 200 and r.data == JPEG + b"default" and r.mimetype == "image/jpeg"
+    assert bg.client.get("/admin/background").get_json() == {"custom": False}
+
+
+def test_a_new_upload_of_another_type_replaces_the_old_one(bg):
+    _upload(bg, PNG)
+    _upload(bg, JPEG)
+    assert [p.name for p in bg.uploads.iterdir()] == ["custom_background.jpg"]
+    assert _served(bg).data == JPEG
 
 
 def test_non_images_and_disguised_files_are_rejected(bg):
     assert _upload(bg, b"<html>not an image</html>", "evil.png").status_code == 415
     assert _upload(bg, b"MZ\x90\x00" + b"\x00" * 64, "x.jpg").status_code == 415
-    assert not (bg.static / "background.jpg").exists()
+    assert not bg.uploads.exists()
 
 
 def test_missing_or_empty_file_field_is_a_400(bg):
-    assert (
-        bg.client.post("/admin/background", data={}, headers=bg.csrf, content_type="multipart/form-data").status_code
-        == 400
-    )
+    no_file = bg.client.post("/admin/background", data={}, headers=bg.csrf, content_type="multipart/form-data")
+    assert no_file.status_code == 400
     assert _upload(bg, PNG, name="").status_code == 400
 
 
@@ -203,50 +234,96 @@ def test_oversized_image_is_a_413(bg):
     assert _upload(bg, PNG + b"\x00" * 200).status_code == 413
 
 
-def test_upload_write_failure_is_a_500_and_leaves_no_temp_file(bg):
+def test_upload_failure_is_a_500_and_leaves_no_temp_file(bg):
     def boom(src, dst):
         raise OSError("disk full")
 
     bg.mp.setattr(bg.app.os, "replace", boom)
     assert _upload(bg, PNG).status_code == 500
-    assert list(bg.static.iterdir()) == []
+    assert list(bg.uploads.iterdir()) == []
+    assert _served(bg).data == JPEG + b"default"  # the previous background is untouched
+
+
+def test_an_unwritable_upload_directory_is_a_500_not_a_crash(bg):
+    def boom(path, exist_ok=False):
+        raise PermissionError(13, "Permission denied", path)
+
+    bg.mp.setattr(bg.app.os, "makedirs", boom)
+    r = _upload(bg, PNG)
+    assert r.status_code == 500 and r.get_json()["error"] == "Could not save background"
 
 
 def test_custom_flag_and_reset_to_the_default(bg):
-    (bg.static / "background.jpg").write_bytes(JPEG)
-    (bg.static / "background_default.jpg").write_bytes(JPEG)
     assert bg.client.get("/admin/background").get_json() == {"custom": False}
     assert _upload(bg, PNG).status_code == 200
     assert bg.client.get("/admin/background").get_json() == {"custom": True}
     assert bg.client.delete("/admin/background", headers=bg.csrf).status_code == 200
-    assert (bg.static / "background.jpg").read_bytes() == JPEG
     assert bg.client.get("/admin/background").get_json() == {"custom": False}
+    assert list(bg.uploads.iterdir()) == []
+    assert _served(bg).data == JPEG + b"default"
 
 
-def test_reset_without_a_saved_default_is_a_404(bg):
-    assert bg.client.delete("/admin/background", headers=bg.csrf).status_code == 404
+def test_reset_with_nothing_uploaded_is_a_harmless_200(bg):
+    assert bg.client.delete("/admin/background", headers=bg.csrf).status_code == 200
 
 
-def test_reset_copy_failure_is_a_500(bg):
-    (bg.static / "background_default.jpg").write_bytes(JPEG)
+def test_reset_failure_is_a_500(bg):
+    _upload(bg, PNG)
 
-    def boom(src, dst):
+    def boom(path):
         raise OSError("read-only")
 
-    bg.mp.setattr(bg.app.shutil, "copy2", boom)
+    bg.mp.setattr(bg.app.os, "remove", boom)
     assert bg.client.delete("/admin/background", headers=bg.csrf).status_code == 500
 
 
-def test_custom_flag_is_true_when_the_current_image_is_missing_so_reset_can_restore_it(bg):
-    """A saved default with no current image is not 'the default in place': report it as custom.
+def test_unchanged_background_revalidates_with_a_304_and_a_new_one_does_not(bg):
+    _upload(bg, PNG)
+    first = _served(bg)
+    assert first.headers["ETag"] and "no-cache" in first.headers["Cache-Control"]
+    assert bg.client.get("/static/background.jpg", headers={"If-None-Match": first.headers["ETag"]}).status_code == 304
+    _upload(bg, PNG + b"different")
+    assert bg.client.get("/static/background.jpg", headers={"If-None-Match": first.headers["ETag"]}).status_code == 200
 
-    That keeps "reset to default" available, and resetting is exactly what restores the file.
-    """
-    (bg.static / "background_default.jpg").write_bytes(JPEG)  # default exists, background.jpg does not
-    assert bg.client.get("/admin/background").get_json() == {"custom": True}
-    assert bg.client.delete("/admin/background", headers=bg.csrf).status_code == 200
-    assert (bg.static / "background.jpg").read_bytes() == JPEG
-    assert bg.client.get("/admin/background").get_json() == {"custom": False}
+
+def _background_dir_for(tmp_path, **extra_env):
+    """Import a throwaway copy of the app (real ConfigParser, no pytest-cov) and report BACKGROUND_DIR."""
+    import os
+    import shutil
+    import subprocess
+    import sys
+
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    work = tmp_path / "app"
+    work.mkdir()
+    for name in os.listdir(root):
+        if name.endswith(".py"):
+            shutil.copy(os.path.join(root, name), work / name)
+    for d in ("templates", "static"):
+        shutil.copytree(os.path.join(root, d), work / d)
+    (work / "config.ini").write_text(
+        "[HomeAssistant]\nurl = http://x\ntoken = t\nswitch_entity = switch.d\n"
+        "[admin]\nadmin_password = a-real-password\n"
+    )
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("COV_CORE", "COVERAGE", "DOOROPENER_"))}
+    env.update(FLASK_SECRET_KEY="x" * 32, USERS_STORE_PATH=str(tmp_path / "u.json"), **extra_env)
+    code = f"import sys; sys.path.insert(0, {str(work)!r}); import app; print(app.BACKGROUND_DIR)"
+    out = subprocess.run([sys.executable, "-I", "-c", code], cwd=work, env=env, capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr[-1500:]
+    return out.stdout.strip().splitlines()[-1]
+
+
+def test_upload_dir_defaults_to_a_subfolder_of_the_log_directory(tmp_path):
+    logs = tmp_path / "logs"
+    assert _background_dir_for(tmp_path, DOOROPENER_LOG_DIR=str(logs)) == str(logs / "background")
+
+
+def test_upload_dir_can_be_overridden(tmp_path):
+    custom = tmp_path / "somewhere" / "bg"
+    result = _background_dir_for(
+        tmp_path, DOOROPENER_LOG_DIR=str(tmp_path / "logs"), DOOROPENER_BACKGROUND_DIR=str(custom)
+    )
+    assert result == str(custom)
 
 
 # --- problem reports --------------------------------------------------------------------------

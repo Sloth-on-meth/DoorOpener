@@ -12,7 +12,6 @@ import json
 import logging
 import os
 import secrets
-import shutil
 import tempfile
 import time
 import traceback
@@ -33,6 +32,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_file,
     send_from_directory,
     session,
     url_for,
@@ -398,8 +398,15 @@ ADMIN_REMEMBER_MAX_AGE = timedelta(days=config.getint("security", "admin_remembe
 
 # --- Background image paths ---
 STATIC_DIR = os.path.join(app.root_path, "static")
-BACKGROUND_PATH = os.path.join(STATIC_DIR, "background.jpg")
+# The default background ships in the image and is never written to.
 BACKGROUND_DEFAULT_PATH = os.path.join(STATIC_DIR, "background_default.jpg")
+# Uploaded backgrounds need a directory the runtime user can write to and that survives container
+# recreation. The app directory is neither (it is owned by root in the image and rebuilt on every
+# pull), so by default they go in a subfolder of the log directory: the one location the standard
+# compose file mounts and the entrypoint hands to the runtime user. Override with
+# DOOROPENER_BACKGROUND_DIR.
+BACKGROUND_DIR = os.path.abspath(os.environ.get("DOOROPENER_BACKGROUND_DIR") or os.path.join(log_dir, "background"))
+CUSTOM_BACKGROUND_STEM = "custom_background"
 ALLOWED_IMAGE_TYPES = {"jpg", "png", "gif", "webp"}
 MAX_BACKGROUND_SIZE = 10 * 1024 * 1024  # 10 MB
 # Request body caps. Every endpoint except the background upload takes a tiny JSON body (a PIN,
@@ -409,12 +416,43 @@ MAX_JSON_BODY = 64 * 1024
 MAX_UPLOAD_BODY = MAX_BACKGROUND_SIZE + 1024 * 1024
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BODY
 
-# Preserve the default background on first run so it can be restored later
-if os.path.exists(BACKGROUND_PATH) and not os.path.exists(BACKGROUND_DEFAULT_PATH):
-    try:
-        shutil.copy2(BACKGROUND_PATH, BACKGROUND_DEFAULT_PATH)
-    except OSError:
-        pass
+IMAGE_MIMETYPES = {"jpg": "image/jpeg", "png": "image/png", "gif": "image/gif", "webp": "image/webp"}
+
+
+def _custom_background():
+    """Return (path, extension) of the newest uploaded background, or None if there is none."""
+    found = []
+    for ext in IMAGE_MIMETYPES:
+        path = os.path.join(BACKGROUND_DIR, f"{CUSTOM_BACKGROUND_STEM}.{ext}")
+        if os.path.isfile(path):
+            found.append((os.path.getmtime(path), path, ext))
+    if not found:
+        return None
+    _, path, ext = max(found)
+    return path, ext
+
+
+def _remove_custom_backgrounds(keep=None):
+    """Delete uploaded backgrounds (all of them, or all but `keep`). Raises OSError on failure."""
+    for ext in IMAGE_MIMETYPES:
+        path = os.path.join(BACKGROUND_DIR, f"{CUSTOM_BACKGROUND_STEM}.{ext}")
+        if path != keep and os.path.isfile(path):
+            os.remove(path)
+
+
+@app.route("/static/background.jpg")
+def background_image():
+    """The page background: the uploaded image if there is one, otherwise the bundled default.
+
+    Registered on the exact URL the templates already use, so it takes precedence over Flask's
+    generic /static route and no template changes. Conditional requests (ETag/Last-Modified) are
+    handled by Flask, so an unchanged image costs a 304.
+    """
+    custom = _custom_background()
+    if custom:
+        path, ext = custom
+        return send_file(path, mimetype=IMAGE_MIMETYPES[ext])
+    return send_from_directory(STATIC_DIR, "background_default.jpg", mimetype="image/jpeg")
 
 
 @app.route("/service-worker.js")
@@ -1478,19 +1516,7 @@ def admin_background_get():
     """Return whether a custom background is currently set. Requires admin auth."""
     if not _require_admin_authenticated():
         return jsonify({"error": "Unauthorized"}), 401
-    has_custom = os.path.exists(BACKGROUND_DEFAULT_PATH) and not _backgrounds_are_identical()
-    return jsonify({"custom": has_custom})
-
-
-def _backgrounds_are_identical() -> bool:
-    """Return True if the current background matches the default (byte-for-byte)."""
-    if not os.path.exists(BACKGROUND_DEFAULT_PATH):
-        return False
-    try:
-        with open(BACKGROUND_PATH, "rb") as f1, open(BACKGROUND_DEFAULT_PATH, "rb") as f2:
-            return f1.read() == f2.read()
-    except OSError:
-        return False
+    return jsonify({"custom": _custom_background() is not None})
 
 
 @app.route("/admin/background", methods=["POST"])
@@ -1518,18 +1544,22 @@ def admin_background_upload():
         return jsonify({"error": "Invalid image type. Allowed: JPEG, PNG, GIF, WebP"}), 415
     img_type = kind.extension
 
-    # Write atomically via temp file
+    # Write atomically (temp file + rename in the same directory), then drop any older upload of
+    # another type so the newest image is the only one.
+    target = os.path.join(BACKGROUND_DIR, f"{CUSTOM_BACKGROUND_STEM}.{img_type}")
     try:
-        fd, tmp_path = tempfile.mkstemp(dir=STATIC_DIR)
+        os.makedirs(BACKGROUND_DIR, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=BACKGROUND_DIR, suffix=".tmp")
         try:
             with os.fdopen(fd, "wb") as tmp:
                 tmp.write(data)
-            os.replace(tmp_path, BACKGROUND_PATH)
+            os.replace(tmp_path, target)
         except Exception:
             os.unlink(tmp_path)
             raise
+        _remove_custom_backgrounds(keep=target)
     except OSError as e:
-        logger.error(f"Failed to save background image: {e}")
+        logger.error(f"Failed to save background image in {BACKGROUND_DIR}: {e}")
         return jsonify({"error": "Could not save background"}), 500
 
     logger.info(f"Background image updated by admin ({len(data)} bytes, type={img_type})")
@@ -1538,19 +1568,16 @@ def admin_background_upload():
 
 @app.route("/admin/background", methods=["DELETE"])
 def admin_background_reset():
-    """Reset the background image to the original default. Requires admin auth."""
+    """Reset the background image to the bundled default. Requires admin auth."""
     if not _require_admin_authenticated():
         return jsonify({"error": "Unauthorized"}), 401
     if not _check_admin_csrf():
         return jsonify({"error": "Invalid CSRF token"}), 403
 
-    if not os.path.exists(BACKGROUND_DEFAULT_PATH):
-        return jsonify({"error": "No default background to restore"}), 404
-
     try:
-        shutil.copy2(BACKGROUND_DEFAULT_PATH, BACKGROUND_PATH)
+        _remove_custom_backgrounds()
     except OSError as e:
-        logger.error(f"Failed to restore default background: {e}")
+        logger.error(f"Failed to remove custom background in {BACKGROUND_DIR}: {e}")
         return jsonify({"error": "Could not restore default"}), 500
 
     logger.info("Background image reset to default by admin")
