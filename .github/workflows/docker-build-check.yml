@@ -1,0 +1,38 @@
+name: Docker Build Check
+
+# Builds the image for every published platform WITHOUT pushing, so a change that breaks the
+# arm64 (or amd64) build is caught on the pull request instead of after merge. The publishing
+# workflow (docker-build.yml) only runs on main and on releases.
+on:
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - "requirements.txt"
+      - "entrypoint.sh"
+      - ".dockerignore"
+      - ".github/workflows/docker-build.yml"
+      - ".github/workflows/docker-build-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (linux/amd64 + linux/arm64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          push: false
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
