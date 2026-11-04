@@ -70,6 +70,8 @@ cp .env.example .env               # set FLASK_SECRET_KEY at minimum
 docker compose up -d
 ```
 
+The published image is multi-architecture (`linux/amd64` and `linux/arm64`), so the same compose file works on a Raspberry Pi or other ARM64 board.
+
 Then open `http://localhost:6532` on the Docker host, or the URL configured on your reverse proxy. The port is published on `127.0.0.1` by default; see `DOOROPENER_BIND` below if you need it reachable directly.
 
 ### Build locally
