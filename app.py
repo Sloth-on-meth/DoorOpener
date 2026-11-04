@@ -805,6 +805,16 @@ def _send_open_command(matched_user, primary_ip, session_id, now, *, via_oidc=Fa
         return jsonify({"status": "error", "message": reason}), 500
     except requests.RequestException as e:
         logger.error(f"Error communicating with Home Assistant: {e}")
+        # A valid PIN that did not open the door must be visible in the audit trail, which is what
+        # admins read, not only in the application log. Record the failure class, never the
+        # exception text (it can contain the Home Assistant URL).
+        status_code = getattr(getattr(e, "response", None), "status_code", None)
+        reason = (
+            f"Home Assistant API error: {status_code}"
+            if status_code is not None
+            else f"Home Assistant unreachable ({type(e).__name__})"
+        )
+        log_attempt("FAILURE", reason, user=matched_user, primary_ip=primary_ip, session_id=session_id, now=now)
         return jsonify({"status": "error", "message": "Failed to contact Home Assistant"}), 502
     except Exception as e:
         reason = "Internal server error during API call"
