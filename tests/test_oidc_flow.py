@@ -81,12 +81,12 @@ def callback(client, *, state="s-1", nonce="nonce-1", plant=None):
     return client.get(f"/oidc/callback?state={state or ''}")
 
 
-def denied(client, resp):
-    """Any outcome that does not log the visitor in (401 or 403 depending on where it is raised)."""
+def denied(client, resp, code=401):
+    """The visitor was refused with exactly `code` and no session of any kind was created."""
     with client.session_transaction() as s:
         assert not s.get("oidc_authenticated")
         assert not s.get("admin_authenticated")
-    return resp.status_code in (401, 403)
+    return resp.status_code == code
 
 
 # --- login redirect ---------------------------------------------------------------------------
@@ -222,16 +222,16 @@ def test_invalid_audience_issuer_or_times_are_rejected(env, over):
     assert denied(client, callback(client))
 
 
-def test_user_outside_the_required_group_is_denied(env):
+def test_user_outside_the_required_group_is_denied_with_403(env):
     env.monkeypatch.setattr(env.app, "oidc_user_group", "door-users")
     client = env.install(FakeAuthentik(make_claims(groups=["somewhere-else"])))
-    assert denied(client, callback(client))
+    assert denied(client, callback(client), code=403)
 
 
-def test_group_policy_with_no_groups_in_the_token_is_denied(env):
+def test_group_policy_with_no_groups_in_the_token_is_denied_with_403(env):
     env.monkeypatch.setattr(env.app, "oidc_user_group", "door-users")
     client = env.install(FakeAuthentik(make_claims(groups=None)))
-    assert denied(client, callback(client))
+    assert denied(client, callback(client), code=403)
 
 
 def test_token_exchange_failure_is_a_401(env):
