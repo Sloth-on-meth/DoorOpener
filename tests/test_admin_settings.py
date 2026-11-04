@@ -102,6 +102,7 @@ def test_test_mode_needs_the_enabled_field(env):
 
 def test_test_mode_is_not_changed_when_the_config_cannot_be_saved(env):
     env.app.test_mode = True
+    env.cfg.set("server", "test_mode", "true")
 
     def boom():
         raise OSError("read-only")
@@ -109,6 +110,40 @@ def test_test_mode_is_not_changed_when_the_config_cannot_be_saved(env):
     env.mp.setattr(env.app, "save_config", boom)
     r = env.client.post("/admin/test-mode", json={"enabled": False}, headers=env.csrf)
     assert r.status_code == 500 and env.app.test_mode is True
+    assert env.cfg.get("server", "test_mode") == "true"  # the in-memory config was rolled back too
+
+
+def test_a_failed_test_mode_save_is_not_persisted_by_a_later_unrelated_save(env):
+    """Before: the failed change stayed in memory and the next successful save (here, a notice)
+    wrote `test_mode = false` to disk even though the admin was told it failed."""
+    env.app.test_mode = True
+    env.cfg.set("server", "test_mode", "true")
+    real_save = env.app.save_config
+    env.mp.setattr(env.app, "save_config", lambda: (_ for _ in ()).throw(OSError("read-only")))
+    assert env.client.post("/admin/test-mode", json={"enabled": False}, headers=env.csrf).status_code == 500
+    env.mp.setattr(env.app, "save_config", real_save)
+    assert env.client.post("/admin/notice", json={"notice": "hello"}, headers=env.csrf).status_code == 200
+    on_disk = env.path.read_text()
+    assert "test_mode = true" in on_disk and "test_mode = false" not in on_disk
+
+
+def test_a_test_mode_option_that_did_not_exist_is_removed_again_after_a_failed_save(env):
+    assert not env.cfg.has_option("server", "test_mode")
+    env.mp.setattr(env.app, "save_config", lambda: (_ for _ in ()).throw(OSError("read-only")))
+    assert env.client.post("/admin/test-mode", json={"enabled": True}, headers=env.csrf).status_code == 500
+    assert not env.cfg.has_option("server", "test_mode")
+
+
+def test_a_failed_notice_save_is_rolled_back_too(env):
+    env.cfg.set("server", "notice", "old notice")
+    real_save = env.app.save_config
+    env.mp.setattr(env.app, "save_config", lambda: (_ for _ in ()).throw(OSError("read-only")))
+    assert env.client.post("/admin/notice", json={"notice": "new notice"}, headers=env.csrf).status_code == 500
+    assert env.client.post("/admin/notice", json={"notice": ""}, headers=env.csrf).status_code == 500  # clearing
+    assert env.cfg.get("server", "notice") == "old notice"
+    env.mp.setattr(env.app, "save_config", real_save)
+    env.client.post("/admin/test-mode", json={"enabled": True}, headers=env.csrf)  # an unrelated successful save
+    assert "old notice" in env.path.read_text() and "new notice" not in env.path.read_text()
 
 
 # --- background image -------------------------------------------------------------------------
