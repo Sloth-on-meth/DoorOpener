@@ -237,6 +237,11 @@ class UsersStore:
                     return username
         return None
 
+    def all_pins(self) -> set:
+        """Every PIN held by a store user, active or not (a disabled user's PIN is still taken)."""
+        self._ensure_loaded()
+        return {m["pin"] for m in self.data["users"].values() if isinstance(m.get("pin"), str)}
+
     def pin_exists(self, pin: str, exclude_username: Optional[str] = None) -> bool:
         """Return True if the PIN is already assigned to any store user (excluding one username)."""
         self._ensure_loaded()

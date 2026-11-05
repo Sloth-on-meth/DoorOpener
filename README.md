@@ -24,6 +24,7 @@ A web-based keypad for controlling smart door locks via Home Assistant. PIN-prot
 
 - Visual 3×4 keypad with auto-submit on valid PIN length
 - Per-user PINs (4–8 digits), stored in a JSON user store
+- Random PIN generator in the add-user form; it never reuses an existing PIN (including disabled users') or an obvious one like 1111 or 1234
 - Admin dashboard — user management, audit logs, leaderboard, 24-hour activity chart
 - Public notice — admin can post a message displayed above the keypad
 - Custom background image — upload, preview, and reset from the admin panel
@@ -262,6 +263,7 @@ The password was accepted but your browser did not keep the login session. This 
 | `PUT` | `/admin/users/<name>` | Admin | Update user |
 | `DELETE` | `/admin/users/<name>` | Admin | Delete user |
 | `POST` | `/admin/users/<name>/migrate` | Admin | Migrate user from config.ini to JSON store |
+| `GET` | `/admin/generate-pin?length=4-8` | Admin | Random PIN no user has (default 6 digits) |
 | `POST` | `/admin/users/migrate-all` | Admin | Migrate all config-only users |
 
 ---
