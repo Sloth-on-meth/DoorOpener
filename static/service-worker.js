@@ -1,11 +1,13 @@
 /* DoorOpener Service Worker */
-const CACHE_VERSION = 'v4'; // bump on every deploy to bust stale caches
+const CACHE_VERSION = 'v5'; // bump on every deploy to bust stale caches
 const CACHE_NAME = `dooropener-cache-${CACHE_VERSION}`;
 const ASSETS = [
   '/',
   '/static/background.jpg',
   '/static/favicon.png',
   '/static/gear.png',
+  '/static/index.css',
+  '/static/index.js',
   '/manifest.webmanifest'
 ];
 

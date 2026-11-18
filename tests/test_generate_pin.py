@@ -226,7 +226,7 @@ fill(card).then(() => console.log(JSON.stringify({
 
 
 def _fill_source():
-    html = open(os.path.join(ROOT, "templates", "admin.html"), encoding="utf-8").read()
+    html = open(os.path.join(ROOT, "static", "admin.js"), encoding="utf-8").read()
     start = html.index("async function fillGeneratedPin(card)")
     depth, i = 0, html.index("{", start)
     for j in range(i, len(html)):
@@ -348,7 +348,7 @@ def test_the_confirm_button_stays_blocked_until_the_latest_request_finishes():
 
 
 def _function_source(name):
-    html = open(os.path.join(ROOT, "templates", "admin.html"), encoding="utf-8").read()
+    html = open(os.path.join(ROOT, "static", "admin.js"), encoding="utf-8").read()
     start = html.index(f"function {name}(")
     depth, i = 0, html.index("{", start)
     for j in range(i, len(html)):
