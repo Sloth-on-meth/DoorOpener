@@ -817,6 +817,22 @@
         }
 
         /* Notice banner */
+        #offline-banner {
+            width: 100%;
+            box-sizing: border-box;
+            margin-bottom: 1rem;
+            padding: 0.7rem 1rem;
+            background: rgba(220, 53, 69, 0.18);
+            border: 1px solid rgba(220, 53, 69, 0.5);
+            border-radius: 12px;
+            color: #b02a37;
+            font-size: 0.85rem;
+            font-weight: 600;
+            line-height: 1.4;
+            text-align: center;
+        }
+        #offline-banner[hidden] { display: none; }
+
         #notice-banner {
             width: 100%;
             box-sizing: border-box;
