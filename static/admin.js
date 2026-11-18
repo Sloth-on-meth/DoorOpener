@@ -290,7 +290,13 @@
             // Log controls
             document.getElementById('sortBy').addEventListener('change', sortLogs);
             document.getElementById('filterUser').addEventListener('change', filterLogs);
-            document.getElementById('filterStatus').addEventListener('change', filterLogs);
+            document.querySelectorAll('#logCategories .chip').forEach(chip => {
+                chip.addEventListener('click', () => {
+                    logCategory = chip.dataset.cat;
+                    updateCategoryChips();
+                    filterLogs();
+                });
+            });
             document.getElementById('btnRefreshLogs').addEventListener('click', loadLogs);
             document.getElementById('btnClearAll').addEventListener('click', () => openClearAll('btnClearAll'));
 
@@ -323,8 +329,10 @@
             const data = await res.json();
             allLogs = data.logs || [];
             populateUserFilter();
+            updateCategoryChips();
             filterLogs();
             updateStats();
+            loadStats();
         } catch (e) {
             document.getElementById('logTableBody').innerHTML = '<tr><td colspan="5" class="no-data">Error loading logs</td></tr>';
         } finally {
@@ -333,19 +341,27 @@
     }
 
     // ====== STATS + LEADERBOARD ======
+    let _statsLoading = false;
+    let _statsAgain = false;
+    async function loadStats() {
+        if (!isAuthenticated) return;
+        if (_statsLoading) { _statsAgain = true; return; }  // re-run afterwards so a refresh is never dropped
+        _statsLoading = true;
+        try {
+            const res = await fetch('/admin/stats', { credentials: 'same-origin', cache: 'no-store' });
+            if (!res.ok) throw new Error('stats ' + res.status);
+            AdminStats.render(await res.json());
+        } catch (e) {
+            const note = document.getElementById('statsNote');
+            if (note) note.textContent = 'Could not load statistics.';
+        } finally {
+            _statsLoading = false;
+            if (_statsAgain) { _statsAgain = false; loadStats(); }
+        }
+    }
+
     function updateStats() {
-        const total = allLogs.length;
-        const success = allLogs.filter(l => l.status === 'SUCCESS').length;
-        const failed = total - success;
-        const rate = total > 0 ? Math.round(success / total * 100) : 0;
-
-        document.getElementById('statTotal').textContent = total;
-        document.getElementById('statSuccess').textContent = success;
-        document.getElementById('statFailed').textContent = failed;
-        document.getElementById('statRate').textContent = rate + '%';
-
         updateLeaderboard();
-        if (document.getElementById('activityTab').style.display !== 'none') updateHourlyChart();
     }
 
     function updateLeaderboard() {
@@ -492,11 +508,41 @@
             users.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
     }
 
+    // ====== LOG CATEGORIES ======
+    let logCategory = 'door';  // door | security | admin | system | '' (all)
+    const CATEGORY_HINTS = {
+        door: 'Keypad and SSO attempts: who opened the door, wrong PINs, disabled accounts.',
+        security: 'The rate limiter stepping in: blocked sessions and IP addresses.',
+        admin: 'Everything done in this dashboard: logins, user changes, clearing logs.',
+        system: 'Faults: the PIN was right but the door did not open (Home Assistant or server errors).',
+        '': 'Everything, all categories.',
+    };
+
+    function updateCategoryChips() {
+        const counts = { '': allLogs.length };
+        allLogs.forEach(l => { counts[l.category] = (counts[l.category] || 0) + 1; });
+        document.querySelectorAll('#logCategories .chip').forEach(chip => {
+            const cat = chip.dataset.cat;
+            chip.querySelector('.chip-n').textContent = counts[cat] || 0;
+            const on = cat === logCategory;
+            chip.classList.toggle('active', on);
+            chip.setAttribute('aria-pressed', String(on));
+        });
+        const hint = document.getElementById('logCategoryHint');
+        if (hint) hint.textContent = CATEGORY_HINTS[logCategory] || '';
+    }
+
+    function logBadge(log) {
+        const cls = { ok: 'badge-success', bad: 'badge-failure', warn: 'badge-warn', info: 'badge-info' }[log.severity] || 'badge-info';
+        const icon = logCategory ? '' : ((AdminStats.CATEGORY_ICON[log.category] || '') + ' ');
+        return `<span class="badge ${cls}">${icon}${escapeHtml(log.label || log.status || 'Unknown')}</span>`
+            + (log.test ? ' <span class="badge badge-test">test</span>' : '');
+    }
+
     function filterLogs() {
         const uf = document.getElementById('filterUser').value;
-        const sf = document.getElementById('filterStatus').value;
         filteredLogs = allLogs.filter(l =>
-            (!uf || l.user === uf) && (!sf || l.status === sf)
+            (!logCategory || l.category === logCategory) && (!uf || l.user === uf)
         );
         sortLogs();
     }
@@ -507,7 +553,7 @@
             if (s === 'time')     return b.timestamp.localeCompare(a.timestamp);
             if (s === 'time_asc') return a.timestamp.localeCompare(b.timestamp);
             if (s === 'user')     return (a.user||'').localeCompare(b.user||'');
-            if (s === 'status')   return a.status.localeCompare(b.status);
+            if (s === 'status')   return (a.label || a.status || '').localeCompare(b.label || b.status || '');
             return 0;
         });
         renderLogs();
@@ -518,16 +564,15 @@
         const cardEl  = document.getElementById('logCards');
 
         if (!filteredLogs.length) {
-            tbody.innerHTML = '<tr><td colspan="5" class="no-data">No logs found</td></tr>';
+            const none = logCategory ? 'No ' + logCategory + ' events logged' : 'No logs found';
+            tbody.innerHTML = '<tr><td colspan="5" class="no-data">' + none + '</td></tr>';
             if (cardEl) cardEl.innerHTML = '';
             return;
         }
 
         tbody.innerHTML = filteredLogs.map(log => {
             const ts = fmtTs(log.timestamp);
-            const badge = log.status === 'SUCCESS'
-                ? '<span class="badge badge-success">Success</span>'
-                : '<span class="badge badge-failure">Failure</span>';
+            const badge = logBadge(log);
             return `<tr>
                 <td class="td-ts">${ts}</td>
                 <td class="td-ip">${escapeHtml(log.ip||'')}</td>
@@ -540,9 +585,7 @@
         if (cardEl) {
             cardEl.innerHTML = filteredLogs.map(log => {
                 const ts = fmtTs(log.timestamp);
-                const badge = log.status === 'SUCCESS'
-                    ? '<span class="badge badge-success">Success</span>'
-                    : '<span class="badge badge-failure">Failure</span>';
+                const badge = logBadge(log);
                 return `<div class="glass mobile-card">
                     <div class="mobile-card-hd">
                         <strong class="mc-name">${escapeHtml(log.user||'Unknown')}</strong>
@@ -573,61 +616,7 @@
         document.getElementById('activityTab').style.display  = tab === 'activity' ? 'block' : 'none';
         if (tab === 'logs') loadLogs();
         else if (tab === 'users') loadUsers();
-        else if (tab === 'activity') { if (!allLogs.length) loadLogs(); else updateHourlyChart(); }
-    }
-
-    // ====== HOURLY CHART ======
-    function updateHourlyChart() {
-        const counts = Array(24).fill(0);
-        const successes = Array(24).fill(0);
-        allLogs.forEach(l => {
-            if (!l.timestamp) return;
-            const h = new Date(l.timestamp).getHours();
-            if (isNaN(h)) return;
-            counts[h]++;
-            if (l.status === 'SUCCESS') successes[h]++;
-        });
-
-        const maxVal = Math.max(...counts, 1);
-        const labels = ['12a','1a','2a','3a','4a','5a','6a','7a','8a','9a','10a','11a',
-                        '12p','1p','2p','3p','4p','5p','6p','7p','8p','9p','10p','11p'];
-        const nowHour = new Date().getHours();
-        const LABEL_H = 18;   // px reserved for the hour label
-        const BAR_H   = 160 - LABEL_H; // px available for bars
-
-        const wrap = document.getElementById('hourlyChart');
-        wrap.innerHTML = '';
-        counts.forEach((cnt, h) => {
-            const barPx  = Math.round(cnt / maxVal * BAR_H);
-            const succPx = cnt > 0 ? Math.round(successes[h] / cnt * barPx) : 0;
-            const isNow  = h === nowHour;
-
-            const col = document.createElement('div');
-            col.className = 'chart-col';
-            col.title = `${labels[h]}: ${cnt} total, ${successes[h]} successful`;
-
-            const barsWrap = document.createElement('div');
-            barsWrap.className = 'chart-bars';
-
-            const bar = document.createElement('div');
-            bar.className = 'chart-bar';
-            bar.style.height = barPx + 'px';
-
-            const barOk = document.createElement('div');
-            barOk.className = 'chart-bar-ok';
-            barOk.style.height = succPx + 'px';
-
-            bar.appendChild(barOk);
-            barsWrap.appendChild(bar);
-
-            const lbl = document.createElement('div');
-            lbl.className = 'chart-lbl' + (isNow ? ' chart-lbl-now' : '');
-            lbl.textContent = labels[h];
-
-            col.appendChild(barsWrap);
-            col.appendChild(lbl);
-            wrap.appendChild(col);
-        });
+        else if (tab === 'activity') loadStats();
     }
 
     // ====== MODALS ======
