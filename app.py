@@ -199,7 +199,7 @@ def save_config() -> None:
     """
     buf = io.StringIO()
     config.write(buf)
-    atomic_write_text(config_path, buf.getvalue())
+    atomic_write_text(config_path, buf.getvalue(), backup_dir=log_dir)
 
 
 # If no env secret key was provided, allow overriding the temporary random with config.ini
@@ -225,7 +225,7 @@ user_pins = dict(config.items("pins")) if config.has_section("pins") else {}
 
 # JSON-backed users store (overrides and new users). Path can be overridden in tests via env.
 USERS_STORE_PATH = os.environ.get("USERS_STORE_PATH", os.path.join(os.path.dirname(__file__), "users.json"))
-users_store = UsersStore(USERS_STORE_PATH)
+users_store = UsersStore(USERS_STORE_PATH, backup_dir=log_dir)
 
 
 def get_effective_user_pins() -> dict:
