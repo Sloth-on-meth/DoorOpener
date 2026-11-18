@@ -2,6 +2,7 @@
         let currentPin = '';
         let isSubmitting = false;
         let autoSubmitTimer = null;
+        let pinVisible = false; // never persisted: every page load starts hidden
         let blockCountdownTimer = null;
         let sendingDotsInterval = null;
         let consecutiveSuccesses = 0;
@@ -80,7 +81,7 @@
             } else {
                 let html = '';
                 for (let i = 0; i < currentPin.length; i++) {
-                    html += '<span class="pin-dot">●</span>';
+                    html += '<span class="pin-dot">' + (pinVisible ? currentPin[i] : '●') + '</span>';
                 }
                 display.innerHTML = html;
             }
@@ -723,6 +724,14 @@
             // Wire up keypad buttons
             document.querySelectorAll('.keypad-btn[data-digit]').forEach(btn => {
                 btn.addEventListener('click', () => addDigit(btn.dataset.digit));
+            });
+            const pinToggle = document.getElementById('pinToggle');
+            if (pinToggle) pinToggle.addEventListener('click', () => {
+                pinVisible = !pinVisible;
+                pinToggle.setAttribute('aria-pressed', String(pinVisible));
+                pinToggle.setAttribute('aria-label', pinVisible ? 'Hide PIN' : 'Show PIN');
+                pinToggle.title = pinVisible ? 'Hide PIN' : 'Show PIN';
+                if (!isSubmitting) updatePinDisplay(); // don't overwrite the "Sending..." indicator
             });
             const clearBtn = document.getElementById('clearBtn');
             if (clearBtn) clearBtn.addEventListener('click', clearPin);

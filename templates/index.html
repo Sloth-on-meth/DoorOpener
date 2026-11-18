@@ -33,8 +33,11 @@
         <div id="test-mode-banner">&#x1F9EA; TEST MODE &mdash; door will not open</div>
         {% endif %}
         <!-- PIN Display -->
-        <div id="pinDisplay">
-            <span class="pin-placeholder">Enter PIN</span>
+        <div class="pin-row">
+            <div id="pinDisplay">
+                <span class="pin-placeholder">Enter PIN</span>
+            </div>
+            <button type="button" id="pinToggle" class="pin-toggle" aria-label="Show PIN" aria-pressed="false" title="Show PIN">&#x1F441;</button>
         </div>
 
         <!-- Keypad -->
