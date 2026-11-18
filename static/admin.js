@@ -631,15 +631,20 @@
     }
 
     // ====== MODALS ======
+    let modalSeq = 0;
     function showModal(title, fieldsHtml, onSubmit, onClose) {
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
         const card = document.createElement('div');
         card.className = 'glass modal-card';
+        const titleId = 'modalTitle' + (++modalSeq);
+        card.setAttribute('role', 'dialog');
+        card.setAttribute('aria-modal', 'true');
+        card.setAttribute('aria-labelledby', titleId);
         card.innerHTML = `
             <div class="modal-hd">
-                <h3 class="modal-title">${title}</h3>
-                <button id="modalCloseBtn" class="btn btn-ghost btn-sm modal-close">✕</button>
+                <h3 class="modal-title" id="${titleId}">${title}</h3>
+                <button id="modalCloseBtn" class="btn btn-ghost btn-sm modal-close" aria-label="Close">✕</button>
             </div>
             <div class="modal-body">${fieldsHtml}</div>
             <div class="modal-ft">
@@ -649,16 +654,43 @@
         `;
         overlay.appendChild(card);
         document.body.appendChild(overlay);
+        const previouslyFocused = document.activeElement;
+        const focusable = () => Array.from(card.querySelectorAll(
+            'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]'
+        )).filter(el => el.offsetParent !== null);
+        // Esc closes; Tab and Shift+Tab stay inside the dialog instead of reaching the page behind it.
+        const onKeydown = e => {
+            if (e.key === 'Escape') {
+                e.stopPropagation();
+                close();
+            } else if (e.key === 'Tab') {
+                const items = focusable();
+                if (!items.length) return;
+                const first = items[0], last = items[items.length - 1];
+                if (!card.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+                else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+                else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+            }
+        };
         const close = () => {
+            document.removeEventListener('keydown', onKeydown, true);
             try { document.body.removeChild(overlay); } catch(e) {}
+            // Give focus back to what opened the dialog (if it is still on the page).
+            if (previouslyFocused && previouslyFocused.focus && document.body.contains(previouslyFocused)) {
+                previouslyFocused.focus();
+            }
             if (onClose) onClose();
         };
+        document.addEventListener('keydown', onKeydown, true);
         overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
         card.querySelector('#modalCloseBtn').addEventListener('click', close);
         card.querySelector('#modalCancel').addEventListener('click', close);
         card.querySelector('#modalOk').addEventListener('click', async () => {
             try { await onSubmit(card); close(); } catch(e) {}
         });
+        // Start on the first field; with no field (confirmations) start on the safe choice, Cancel.
+        const firstField = card.querySelector('.modal-body input, .modal-body select, .modal-body textarea');
+        (firstField || card.querySelector('#modalCancel')).focus();
         return card;
     }
 
