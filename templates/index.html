@@ -34,9 +34,13 @@
         {% endif %}
         <!-- Screen-reader summary of the PIN (never the digits) -->
         <span id="pinAnnounce" class="sr-only" role="status" aria-live="polite"></span>
+        <div id="offline-banner" role="status" aria-live="polite" hidden></div>
         <!-- PIN Display -->
-        <div id="pinDisplay">
-            <span class="pin-placeholder">Enter PIN</span>
+        <div class="pin-row">
+            <div id="pinDisplay">
+                <span class="pin-placeholder">Enter PIN</span>
+            </div>
+            <button type="button" id="pinToggle" class="pin-toggle" aria-label="Show PIN" aria-pressed="false" title="Show PIN">&#x1F441;</button>
         </div>
 
         <!-- Keypad -->

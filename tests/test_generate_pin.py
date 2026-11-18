@@ -206,6 +206,7 @@ const fs = require('fs');
 const { src, scenario } = JSON.parse(fs.readFileSync(0, 'utf8'));
 const els = {
   '#um_pin': { value: '', type: 'password' },
+  '#um_newpin': { value: '', type: 'password' },
   '#um_pin_hint': { textContent: '' },
   '#um_pinlen': { value: scenario.length },
   '#modalOk': { disabled: false },
@@ -218,8 +219,9 @@ const fetch = async (url) => {
   return { ok: scenario.ok, json: async () => scenario.body };
 };
 const fill = new Function('fetch', src + '; return fillGeneratedPin;')(fetch);
-fill(card).then(() => console.log(JSON.stringify({
-  value: els['#um_pin'].value, type: els['#um_pin'].type, hint: els['#um_pin_hint'].textContent, calls,
+const sel = scenario.selector || '#um_pin';
+fill(card, scenario.selector).then(() => console.log(JSON.stringify({
+  value: els[sel].value, type: els[sel].type, hint: els['#um_pin_hint'].textContent, calls,
   confirmDisabled: els['#modalOk'].disabled,
 })));
 """
@@ -227,7 +229,7 @@ fill(card).then(() => console.log(JSON.stringify({
 
 def _fill_source():
     html = open(os.path.join(ROOT, "static", "admin.js"), encoding="utf-8").read()
-    start = html.index("async function fillGeneratedPin(card)")
+    start = html.index("async function fillGeneratedPin(card")
     depth, i = 0, html.index("{", start)
     for j in range(i, len(html)):
         depth += {"{": 1, "}": -1}.get(html[j], 0)
@@ -281,6 +283,7 @@ const fs = require('fs');
 const { src, order, waitAll } = JSON.parse(fs.readFileSync(0, 'utf8'));
 const els = {
   '#um_pin': { value: '', type: 'password' },
+  '#um_newpin': { value: '', type: 'password' },
   '#um_pin_hint': { textContent: '' },
   '#um_pinlen': { value: '6' },
   '#modalOk': { disabled: false },
@@ -370,4 +373,18 @@ def test_the_generate_button_is_wired_up_in_the_add_user_dialog():
 
 def test_generate_is_disabled_while_a_save_is_in_flight():
     src = _function_source("openAddUser")
+    assert "generateBtn.disabled = true" in src and "finally { generateBtn.disabled = false; }" in src
+
+
+@needs_node
+def test_fills_the_edit_dialogs_pin_field_when_given_its_selector():
+    out = run_fill(selector="#um_newpin", body={"pin": "482619", "length": 6})
+    assert out["value"] == "482619" and out["type"] == "text"
+
+
+def test_the_generate_button_is_wired_up_in_the_edit_user_dialog():
+    src = _function_source("openEditUser")
+    assert 'id="um_generate"' in src and 'id="um_pinlen"' in src and 'id="um_pin_hint"' in src
+    assert "const card = showModal(" in src
+    assert "fillGeneratedPin(card, '#um_newpin')" in src
     assert "generateBtn.disabled = true" in src and "finally { generateBtn.disabled = false; }" in src

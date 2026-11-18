@@ -2,6 +2,7 @@
         let currentPin = '';
         let isSubmitting = false;
         let autoSubmitTimer = null;
+        let pinVisible = false; // never persisted: every page load starts hidden
         let blockCountdownTimer = null;
         let sendingDotsInterval = null;
         let consecutiveSuccesses = 0;
@@ -85,7 +86,7 @@
             } else {
                 let html = '';
                 for (let i = 0; i < currentPin.length; i++) {
-                    html += '<span class="pin-dot">●</span>';
+                    html += '<span class="pin-dot">' + (pinVisible ? currentPin[i] : '●') + '</span>';
                 }
                 display.innerHTML = html;
             }
@@ -218,6 +219,8 @@
             startSendingDots(display);
             document.getElementById('submit-overlay').style.display = 'block';
 
+            let keepPin = false;
+
             // Send request to open door
             fetch('/open-door', {
                 method: 'POST',
@@ -228,8 +231,9 @@
                 cache: 'no-store',
                 body: JSON.stringify({ pin: pin })
             })
-                .then(response => response.json().then(data => ({ status: response.status, data })))
+                .then(readDoorResponse)
                 .then(({ status, data }) => {
+                    setOfflineBanner(false);
                     if (status === 200 && data.status === 'success') {
                         const nameMatch = data.message && data.message.match(/Welcome home,?\s+([^!]+)!/);
                         const userName = nameMatch ? nameMatch[1].trim() : null;
@@ -264,7 +268,7 @@
                     }
                 })
                 .catch(error => {
-                    showStatus('Error: Could not connect to server', 'error');
+                    keepPin = reportRequestError(error);
                 })
                 .finally(() => {
                     stopSendingDots();
@@ -275,7 +279,9 @@
                         submitBtn.style.background = 'linear-gradient(135deg, #4CAF50, #45a049)';
                         submitBtn.textContent = '✓';
 
-                        currentPin = '';
+                        // Only clear the PIN once the server has answered; after a connection or server
+                        // problem keep it so the retry is one tap.
+                        if (!keepPin) currentPin = '';
                         updatePinDisplay();
                         setKeypadDisabled(false);
                         isSubmitting = false;
@@ -299,8 +305,9 @@
                 cache: 'no-store',
                 body: JSON.stringify({})
             })
-                .then(response => response.json().then(data => ({ status: response.status, data })))
+                .then(readDoorResponse)
                 .then(({ status, data }) => {
+                    setOfflineBanner(false);
                     if (status === 200 && data.status === 'success') {
                         const nameMatch = data.message && data.message.match(/Welcome home,?\s+([^!]+)!/);
                         const userName = nameMatch ? nameMatch[1].trim() : null;
@@ -323,7 +330,7 @@
                         onDoorFailure();
                     }
                 })
-                .catch(() => showStatus('Error: Could not connect to server', 'error'))
+                .catch(error => { reportRequestError(error); })
                 .finally(() => {
                     stopSendingDots();
                     document.getElementById('submit-overlay').style.display = 'none';
@@ -362,6 +369,38 @@
 
         function onDoorFailure() {
             consecutiveSuccesses = 0;
+        }
+
+        // --- connectivity: tell "can't reach the server" apart from "the server said no" ---
+        function setOfflineBanner(show, message) {
+            const banner = document.getElementById('offline-banner');
+            if (!banner) return;
+            if (message) banner.textContent = message;
+            banner.hidden = !show;
+        }
+
+        const OFFLINE_MESSAGE = "You're offline. The door can't be opened until you're back online.";
+
+        // Parse the response; a non-JSON body (e.g. a proxy's 502 page) is a server problem, not a denial.
+        function readDoorResponse(response) {
+            return response.json().then(
+                data => ({ status: response.status, data }),
+                () => { const e = new Error('bad response'); e.kind = 'server'; e.status = response.status; throw e; }
+            );
+        }
+
+        // Show the right message for a failed request. Returns true when the PIN should be kept so a
+        // retry is one tap (nothing reached the server, so nothing was judged).
+        function reportRequestError(error) {
+            if (error && error.kind === 'server') {
+                setOfflineBanner(false);
+                showStatus('Server problem (' + error.status + '). Please try again in a moment.', 'error');
+            } else {
+                setOfflineBanner(true, navigator.onLine === false
+                    ? OFFLINE_MESSAGE
+                    : "Can't reach the server. Check your connection and try again.");
+            }
+            return true;
         }
 
         function showStatus(message, type, persistent) {
@@ -728,6 +767,17 @@
             // Wire up keypad buttons
             document.querySelectorAll('.keypad-btn[data-digit]').forEach(btn => {
                 btn.addEventListener('click', () => addDigit(btn.dataset.digit));
+            });
+            window.addEventListener('offline', () => setOfflineBanner(true, OFFLINE_MESSAGE));
+            window.addEventListener('online', () => setOfflineBanner(false));
+            if (navigator.onLine === false) setOfflineBanner(true, OFFLINE_MESSAGE);
+            const pinToggle = document.getElementById('pinToggle');
+            if (pinToggle) pinToggle.addEventListener('click', () => {
+                pinVisible = !pinVisible;
+                pinToggle.setAttribute('aria-pressed', String(pinVisible));
+                pinToggle.setAttribute('aria-label', pinVisible ? 'Hide PIN' : 'Show PIN');
+                pinToggle.title = pinVisible ? 'Hide PIN' : 'Show PIN';
+                if (!isSubmitting) updatePinDisplay(); // don't overwrite the "Sending..." indicator
             });
             const clearBtn = document.getElementById('clearBtn');
             if (clearBtn) clearBtn.addEventListener('click', clearPin);

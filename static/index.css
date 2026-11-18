@@ -360,6 +360,7 @@
 
         /* Visible keyboard focus (mouse/touch focus stays unstyled) */
         .keypad-btn:focus-visible,
+        .pin-toggle:focus-visible,
         #ssoLogoutBtn:focus-visible,
         #ssoOpenBtn:focus-visible,
         #ssoLoginBtn:focus-visible,
@@ -849,6 +850,22 @@
         }
 
         /* Notice banner */
+        #offline-banner {
+            width: 100%;
+            box-sizing: border-box;
+            margin-bottom: 1rem;
+            padding: 0.7rem 1rem;
+            background: rgba(220, 53, 69, 0.18);
+            border: 1px solid rgba(220, 53, 69, 0.5);
+            border-radius: 12px;
+            color: #b02a37;
+            font-size: 0.85rem;
+            font-weight: 600;
+            line-height: 1.4;
+            text-align: center;
+        }
+        #offline-banner[hidden] { display: none; }
+
         #notice-banner {
             width: 100%;
             box-sizing: border-box;
@@ -887,6 +904,26 @@
         }
 
         /* PIN display */
+        .pin-row { position: relative; width: 100%; max-width: 300px; margin: 0 auto; }
+        /* symmetric side padding keeps the digits clear of the toggle and centred */
+        .pin-row #pinDisplay { box-sizing: border-box; padding-left: 46px; padding-right: 46px; }
+        .pin-toggle {
+            position: absolute;
+            right: 6px;
+            top: 8px;
+            width: 36px;
+            height: 36px;
+            border: none;
+            border-radius: 50%;
+            background: transparent;
+            color: rgba(0, 0, 0, 0.55);
+            font-size: 18px;
+            cursor: pointer;
+            opacity: 0.8;
+        }
+        .pin-toggle:hover { opacity: 1; background: rgba(255, 255, 255, 0.35); }
+        .pin-toggle[aria-pressed="true"] { opacity: 1; background: rgba(255, 255, 255, 0.5); }
+
         #pinDisplay {
             width: 100%;
             max-width: 300px;
