@@ -606,7 +606,7 @@
         #usersTab     { display:none; }
         #activityTab  { display:none; }
         #btnMigrateAll { display:none; }
-        #hourlyChart  { display:flex; align-items:stretch; gap:2px; height:160px; }
+        #hourlyChart, #dailyChart { display:flex; align-items:stretch; gap:2px; height:160px; }
 
         .sso-divider  { margin:1.2rem 0; color:rgba(255,255,255,0.28); font-size:0.85rem; }
         .ctrl-spacer  { flex:1; }
@@ -710,3 +710,56 @@
         .chart-lbl  { height:18px; display:flex; align-items:center; justify-content:center;
                       font-size:0.58rem; white-space:nowrap; color:rgba(255,255,255,0.35); font-weight:400; }
         .chart-lbl-now { color:#fff; font-weight:700; }
+        .chart-lbl-weekend { color:#ffd740; }
+
+        /* === STATISTICS / LOG CATEGORIES === */
+        .stat-sub { margin-top: 5px; font-size: 0.72rem; color: rgba(255,255,255,0.42); min-height: 1em; }
+        .stats-note { font-size: 0.78rem; color: rgba(255,255,255,0.45); margin: 0 2px 0.8rem; }
+        .stats-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; margin-bottom: 0.9rem; }
+        .stats-cols-3 { grid-template-columns: repeat(3, 1fr); }
+        .stats-cols > .panel, #activityTab > .panel { margin-bottom: 0; }
+        #activityTab > .panel { margin-bottom: 0.9rem; }
+        @media (max-width: 900px) { .stats-cols, .stats-cols-3 { grid-template-columns: 1fr; } }
+
+        /* green = opened, red = denied: the bar's full height is both together */
+        .bars-denied .chart-bar { background: rgba(239,83,80,0.75); }
+        .bars-denied .chart-bar-ok { background: rgba(102,187,106,0.95); }
+        .legend-dot-bad { background: #ef5350; }
+
+        .heatmap { display: grid; grid-template-columns: 2.6em repeat(24, minmax(0, 1fr)); gap: 3px; align-items: center; }
+        .heat-hour, .heat-day { font-size: 0.6rem; color: rgba(255,255,255,0.4); text-align: center; }
+        .heat-day { text-align: left; }
+        .heat-cell { height: 22px; border-radius: 3px; }
+        .heat-scale { display: inline-block; width: 70px; height: 8px; border-radius: 4px;
+                      background: linear-gradient(90deg, rgba(105,240,174,0.06), rgba(105,240,174,1)); }
+
+        .kv { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; font-size: 0.85rem;
+              border-bottom: 1px solid rgba(255,255,255,0.05); color: rgba(255,255,255,0.65); }
+        .kv strong { color: #fff; font-weight: 700; text-align: right; }
+        .kv .mono { font-family: 'Courier New', monospace; }
+        .stat-sub-hd { margin: 12px 0 3px; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.09em;
+                       color: rgba(255,255,255,0.4); font-weight: 700; }
+        .stat-empty { padding: 10px 0; font-size: 0.85rem; color: rgba(255,255,255,0.5); }
+        .stat-foot { margin-top: 10px; font-size: 0.75rem; color: rgba(255,255,255,0.42); }
+        .recent-row { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0 4px 8px; font-size: 0.78rem;
+                      color: rgba(255,255,255,0.6); border-left: 2px solid rgba(100,181,246,0.5); margin: 4px 0; }
+        .recent-row em { font-style: normal; color: rgba(255,255,255,0.4); }
+        .recent-row > span:last-child { white-space: nowrap; color: rgba(255,255,255,0.4); }
+        .recent-row.sev-warn { border-left-color: #ffd740; }
+        .recent-row.sev-bad { border-left-color: #ff5252; }
+
+        .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+        .chip { border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.7);
+                padding: 6px 13px; border-radius: 999px; font-size: 0.82rem; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+        .chip:hover { background: rgba(255,255,255,0.12); color: #fff; }
+        .chip.active { background: linear-gradient(135deg, #1976d2, #1255a4); color: #fff; border-color: transparent; }
+        .chip-n { margin-left: 4px; font-size: 0.72rem; opacity: 0.7; font-weight: 700; }
+        .chip:focus-visible { outline: 2px solid #90caf9; outline-offset: 2px; }
+        .chip-hint { font-size: 0.78rem; color: rgba(255,255,255,0.42); margin: 0 2px 12px; min-height: 1.1em; }
+
+        .badge-warn { background: rgba(255,215,64,0.1); color: #ffd740; border: 1px solid rgba(255,215,64,0.22); }
+        .badge-warn::before { background: #ffd740; }
+        .badge-info { background: rgba(100,181,246,0.1); color: #64b5f6; border: 1px solid rgba(100,181,246,0.22); }
+        .badge-info::before { background: #64b5f6; }
+        .badge-test { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.55); border: 1px dashed rgba(255,255,255,0.25); }
+        .badge-test::before { display: none; }

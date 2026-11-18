@@ -90,21 +90,25 @@
         <div class="dash-row dash-row-bottom">
             <div class="dash-col-stats">
                 <div class="stats-grid">
-                    <div class="glass stat-card stat-info">
-                        <div class="stat-value" id="statTotal">—</div>
-                        <div class="stat-label">Total Attempts</div>
-                    </div>
                     <div class="glass stat-card stat-success">
-                        <div class="stat-value" id="statSuccess">—</div>
-                        <div class="stat-label">Successful</div>
-                    </div>
-                    <div class="glass stat-card stat-danger">
-                        <div class="stat-value" id="statFailed">—</div>
-                        <div class="stat-label">Failed</div>
+                        <div class="stat-value" id="statOpensToday">—</div>
+                        <div class="stat-label">Opened today</div>
+                        <div class="stat-sub" id="statOpensTodaySub">&nbsp;</div>
                     </div>
                     <div class="glass stat-card stat-gold">
                         <div class="stat-value" id="statRate">—</div>
-                        <div class="stat-label">Success Rate</div>
+                        <div class="stat-label">Success rate</div>
+                        <div class="stat-sub" id="statRateSub">&nbsp;</div>
+                    </div>
+                    <div class="glass stat-card stat-info">
+                        <div class="stat-value" id="statBusy">—</div>
+                        <div class="stat-label">Busiest hour</div>
+                        <div class="stat-sub" id="statBusySub">&nbsp;</div>
+                    </div>
+                    <div class="glass stat-card stat-danger">
+                        <div class="stat-value" id="statBlocked">—</div>
+                        <div class="stat-label">Blocked (24h)</div>
+                        <div class="stat-sub" id="statBlockedSub">&nbsp;</div>
                     </div>
                 </div>
             </div>
@@ -117,14 +121,22 @@
 
         <!-- Tabs -->
         <div class="tabs">
-            <button id="tabLogsBtn" class="tab-btn active">📋 Access Logs</button>
+            <button id="tabLogsBtn" class="tab-btn active">📋 Logs</button>
             <button id="tabUsersBtn" class="tab-btn">👥 Users</button>
-            <button id="tabActivityBtn" class="tab-btn">📊 Activity</button>
+            <button id="tabActivityBtn" class="tab-btn">📊 Statistics</button>
         </div>
 
         <!-- Logs Tab -->
         <div id="logsTab">
             <div class="glass panel">
+                <div class="chips" id="logCategories" role="group" aria-label="Log category">
+                    <button type="button" class="chip" data-cat="" aria-pressed="false">All <span class="chip-n">0</span></button>
+                    <button type="button" class="chip active" data-cat="door" aria-pressed="true">🚪 Door <span class="chip-n">0</span></button>
+                    <button type="button" class="chip" data-cat="security" aria-pressed="false">🛡 Security <span class="chip-n">0</span></button>
+                    <button type="button" class="chip" data-cat="admin" aria-pressed="false">🔑 Admin <span class="chip-n">0</span></button>
+                    <button type="button" class="chip" data-cat="system" aria-pressed="false">⚠ System <span class="chip-n">0</span></button>
+                </div>
+                <div id="logCategoryHint" class="chip-hint"></div>
                 <div class="controls">
                     <div class="ctrl-group">
                         <span class="ctrl-label">Sort</span>
@@ -132,21 +144,13 @@
                             <option value="time">Newest first</option>
                             <option value="time_asc">Oldest first</option>
                             <option value="user">User</option>
-                            <option value="status">Status</option>
+                            <option value="status">Event</option>
                         </select>
                     </div>
                     <div class="ctrl-group">
                         <span class="ctrl-label">User</span>
                         <select id="filterUser">
                             <option value="">All</option>
-                        </select>
-                    </div>
-                    <div class="ctrl-group">
-                        <span class="ctrl-label">Status</span>
-                        <select id="filterStatus">
-                            <option value="">All</option>
-                            <option value="SUCCESS">Success</option>
-                            <option value="FAILURE">Failure</option>
                         </select>
                     </div>
                     <div class="ctrl-spacer"></div>
@@ -207,17 +211,54 @@
             </div>
         </div>
 
-        <!-- Activity Tab -->
+        <!-- Statistics Tab -->
         <div id="activityTab">
+            <div id="statsNote" class="stats-note"></div>
+
+            <div class="stats-cols">
+                <div class="glass panel">
+                    <div class="section-hd section-hd-mb">
+                        <h2>📅 Last 14 days</h2>
+                        <div class="chart-legend">
+                            <span><span class="legend-dot legend-dot-ok"></span>Opened</span>
+                            <span><span class="legend-dot legend-dot-bad"></span>Denied</span>
+                        </div>
+                    </div>
+                    <div id="dailyChart" class="bars-denied" role="img" aria-label="Door openings and denials per day for the last 14 days"></div>
+                </div>
+                <div class="glass panel">
+                    <div class="section-hd section-hd-mb">
+                        <h2>🕐 Time of day</h2>
+                        <div class="chart-legend">
+                            <span><span class="legend-dot legend-dot-ok"></span>Opened</span>
+                            <span><span class="legend-dot legend-dot-bad"></span>Denied</span>
+                        </div>
+                    </div>
+                    <div id="hourlyChart" class="bars-denied" role="img" aria-label="Door openings and denials by hour of day"></div>
+                </div>
+            </div>
+
             <div class="glass panel">
                 <div class="section-hd section-hd-mb">
-                    <h2>🕐 Activity by Hour</h2>
-                    <div class="chart-legend">
-                        <span><span class="legend-dot legend-dot-all"></span>All</span>
-                        <span><span class="legend-dot legend-dot-ok"></span>Successful</span>
-                    </div>
+                    <h2>🔥 Busiest times</h2>
+                    <div class="chart-legend"><span>fewer</span><span class="heat-scale"></span><span>more openings</span></div>
                 </div>
-                <div id="hourlyChart"></div>
+                <div id="heatmap" class="heatmap" role="img" aria-label="Door openings by weekday and hour"></div>
+            </div>
+
+            <div class="stats-cols stats-cols-3">
+                <div class="glass panel">
+                    <div class="section-title">🏆 Most active</div>
+                    <div id="topUsersList"></div>
+                </div>
+                <div class="glass panel">
+                    <div class="section-title">🛡 Security</div>
+                    <div id="securityBox"></div>
+                </div>
+                <div class="glass panel">
+                    <div class="section-title">🔑 Admin &amp; system</div>
+                    <div id="adminBox"></div>
+                </div>
             </div>
         </div>
 
@@ -228,6 +269,7 @@
 <div id="toast-container"></div>
 
 <script nonce="{{ csp_nonce }}">window.DOOR_CONFIG = { appVersion: {{ app_version|tojson }} };</script>
+<script src="/static/admin-stats.js"></script>
 <script src="/static/admin.js"></script>
 
 <a href="https://github.com/Sloth-on-meth/DoorOpener" target="_blank" class="github-btn" title="View on GitHub">
