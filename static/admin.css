@@ -639,6 +639,10 @@
         .modal-hd   { display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem; }
         .modal-title { margin:0; color:#fff; font-size:1.05rem; }
         .modal-close { padding:4px 9px; }
+        .btn:focus-visible, .modal-input:focus-visible {
+            outline: 2px solid #90caf9;
+            outline-offset: 2px;
+        }
         .modal-ft   { display:flex; gap:8px; justify-content:flex-end; margin-top:1.2rem; }
         .modal-desc { color:rgba(255,255,255,0.65); font-size:0.9rem; margin-bottom:8px; }
         .modal-desc-sm { color:rgba(255,255,255,0.55); margin-bottom:8px; font-size:0.88rem; }
