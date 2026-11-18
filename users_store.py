@@ -2,6 +2,7 @@ import copy
 import hmac
 import json
 import os
+import tempfile
 from datetime import datetime, timezone
 from functools import wraps
 from inspect import isfunction
@@ -48,6 +49,7 @@ class UsersStore:
 
     def __init__(self, path: str, backup_dir: Optional[str] = None):
         self.path = path
+        # Where a failed in-place save keeps its backup. None = beside the temp file (legacy).
         self.backup_dir = backup_dir
         self.data: Dict[str, Any] = {"users": {}}
         # Copy of the store as of the last successful read or write (None = never succeeded).
@@ -75,11 +77,22 @@ class UsersStore:
             # data to lose, so it's safe to treat like a missing file -- unless a failed save left
             # a backup behind, in which case the file was emptied by the failure and treating it as
             # "no users" would let the next write bury the only good copy.
-            kept = backup_files(self.path, self.backup_dir) if self.backup_dir else []
+            # Without an explicit backup_dir the writer may have used the target's directory or the
+            # system temp dir, so look in both.
+            dirs = [self.backup_dir] if self.backup_dir else [os.path.dirname(self.path) or ".", tempfile.gettempdir()]
+            kept = []
+            for d in dirs:
+                try:
+                    kept += backup_files(self.path, d)
+                except OSError as e:
+                    raise UsersStoreError(
+                        f"Users store at {self.path} is empty and the backup folder {d} "
+                        f"can't be checked ({e}); not treating it as a fresh store"
+                    ) from e
             if kept:
                 raise UsersStoreError(
-                    f"Users store at {self.path} is empty but a backup of it was kept at {kept[-1]}; "
-                    "restore it (copy it over the file) and restart"
+                    f"Users store at {self.path} is empty but backups of it were kept: "
+                    f"{', '.join(kept)} (newest first). Check which is right, copy it over the file, and restart"
                 )
             self.data = {"users": {}}
             return

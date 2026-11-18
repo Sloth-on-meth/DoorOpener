@@ -53,9 +53,12 @@ def test_backup_is_kept_in_backup_dir(tmp_path):
             raise OSError(errno.ENOSPC, "No space left on device")
         return real_copy(src, dst)
 
-    with _force_fallback(), patch("builtins.open", failing_open), patch(
-        "atomic_io.shutil.copyfile", copy_fail_on_restore
-    ), pytest.raises(OSError, match="preserved in"):
+    with (
+        _force_fallback(),
+        patch("builtins.open", failing_open),
+        patch("atomic_io.shutil.copyfile", copy_fail_on_restore),
+        pytest.raises(OSError, match="preserved in"),
+    ):
         atomic_write_text(str(target), "NEW", backup_dir=str(keep))
     kept = backup_files(str(target), str(keep))
     assert len(kept) == 1 and open(kept[0]).read() == "ORIGINAL"
@@ -92,7 +95,10 @@ def test_empty_store_without_backup_is_still_fresh(tmp_path):
 
 def _mount_tiny_tmpfs(path):
     os.makedirs(path, exist_ok=True)
-    r = subprocess.run(["mount", "-t", "tmpfs", "-o", "size=64k", "tmpfs", path], capture_output=True)
+    try:
+        r = subprocess.run(["mount", "-t", "tmpfs", "-o", "size=64k", "tmpfs", path], capture_output=True)
+    except FileNotFoundError:  # no `mount` binary: skip
+        return False
     return r.returncode == 0
 
 
@@ -113,4 +119,40 @@ def test_real_full_disk(tmp_path):
             atomic_write_text(target, "y" * 20000)
         assert open(target).read() == "ORIGINAL"
     finally:
-        subprocess.run(["umount", mnt], capture_output=True)
+        r = subprocess.run(["umount", mnt], capture_output=True)
+        assert r.returncode == 0, r.stderr
+
+
+def test_unwritable_backup_dir_aborts_before_the_live_file_is_opened(tmp_path):
+    target = tmp_path / "users.json"
+    target.write_text("ORIGINAL")
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x")  # makedirs() under a regular file fails
+    with _force_fallback(), pytest.raises(OSError, match="Cannot create a backup"):
+        atomic_write_text(str(target), "NEW", backup_dir=str(blocker / "logs"))
+    assert target.read_text() == "ORIGINAL"
+
+
+def test_unreadable_backup_dir_is_not_mistaken_for_no_backup(tmp_path):
+    path = tmp_path / "users.json"
+    path.write_text("")
+    with patch("atomic_io.os.listdir", side_effect=PermissionError(errno.EACCES, "denied")):
+        with pytest.raises(UsersStoreError, match="can't be checked"):
+            UsersStore(str(path), backup_dir=str(tmp_path)).list_users()
+
+
+def test_one_argument_store_still_finds_a_backup_beside_the_file(tmp_path):
+    path = tmp_path / "users.json"
+    path.write_text("")
+    (tmp_path / "users.json.zzz.bak").write_text("{}")
+    with pytest.raises(UsersStoreError, match="backups"):
+        UsersStore(str(path)).list_users()
+
+
+def test_backups_are_listed_newest_first(tmp_path):
+    older, newer = tmp_path / "users.json.b.bak", tmp_path / "users.json.a.bak"
+    older.write_text("1")
+    newer.write_text("2")
+    os.utime(older, (1, 1))
+    os.utime(newer, (2, 2))
+    assert backup_files(str(tmp_path / "users.json"), str(tmp_path)) == [str(newer), str(older)]
