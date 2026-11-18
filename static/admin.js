@@ -660,9 +660,9 @@
     }
 
     // ====== USER CRUD ======
-    // Fill the add-user PIN field with a random PIN that nobody else has (chosen by the server).
-    async function fillGeneratedPin(card) {
-        const input = card.querySelector('#um_pin');
+    // Fill the PIN field (add-user by default; the edit dialog passes its own selector) with a random PIN that nobody else has (chosen by the server).
+    async function fillGeneratedPin(card, pinSelector = '#um_pin') {
+        const input = card.querySelector(pinSelector);
         const hint = card.querySelector('#um_pin_hint');
         const confirmBtn = card.querySelector('#modalOk');
         const length = card.querySelector('#um_pinlen').value;
@@ -742,17 +742,29 @@
     }
 
     function openEditUser(username) {
-        showModal('Edit User', `
+        const card = showModal('Edit User', `
             <div class="modal-desc-sm">
                 Update PIN for <strong class="modal-hl">${escapeHtml(username)}</strong>
             </div>
             <label class="modal-field-label">New PIN (optional)</label>
-            <input id="um_newpin" class="modal-input" type="password" inputmode="numeric" pattern="[0-9]*" placeholder="leave blank to keep current">
+            <div class="modal-pin-row">
+                <input id="um_newpin" class="modal-input" type="password" inputmode="numeric" pattern="[0-9]*" placeholder="leave blank to keep current">
+                <select id="um_pinlen" class="modal-input modal-pinlen" title="Length of the generated PIN">
+                    <option value="4">4</option><option value="5">5</option><option value="6" selected>6</option>
+                    <option value="7">7</option><option value="8">8</option>
+                </select>
+                <button id="um_generate" type="button" class="btn btn-ghost btn-sm">🎲 Generate</button>
+            </div>
+            <div id="um_pin_hint" class="modal-hint"></div>
         `, async card => {
             const pin = card.querySelector('#um_newpin').value.trim();
             if (pin && !/^\d{4,8}$/.test(pin)) { showToast('PIN must be 4-8 digits', 'error'); throw new Error(); }
-            await editUser(username, pin || undefined);
+            // No new PIN while the one being saved is in flight.
+            const generateBtn = card.querySelector('#um_generate');
+            generateBtn.disabled = true;
+            try { await editUser(username, pin || undefined); } finally { generateBtn.disabled = false; }
         });
+        card.querySelector('#um_generate').addEventListener('click', () => fillGeneratedPin(card, '#um_newpin'));
     }
 
     async function editUser(username, pin) {
