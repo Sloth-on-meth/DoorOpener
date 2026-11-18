@@ -42,6 +42,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 
 from atomic_io import atomic_write_text
+from log_events import compute_stats, read_entries
 from users_store import UsersStore, is_valid_pin, pins_equal
 
 try:
@@ -1637,71 +1638,40 @@ def auth_status():
     )
 
 
+def _load_log_entries():
+    """Parsed and classified audit-log entries (see log_events.py). Empty if there is no log yet."""
+    if not os.path.exists(log_path):
+        return []
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            return read_entries(f)
+    except OSError as e:
+        logger.error(f"Error reading log file: {e}")
+        return []
+
+
 @app.route("/admin/logs")
 def admin_logs():
-    """Get parsed log data for admin dashboard"""
-    # Check if admin is authenticated
+    """Audit-log entries for the admin dashboard, each with its category, label and severity."""
     if not _require_admin_authenticated():
         return jsonify({"error": "Authentication required"}), 401
-
     try:
-        logs = []
-
-        if os.path.exists(log_path):
-            try:
-                with open(log_path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        try:
-                            # Handle log lines that may have timestamp prefix from logging module
-                            json_start = line.find("{")
-                            if json_start != -1:
-                                json_part = line[json_start:]
-                                log_data = json.loads(json_part)
-                            else:
-                                log_data = json.loads(line)
-
-                            logs.append(
-                                {
-                                    "timestamp": log_data.get("timestamp"),
-                                    "ip": log_data.get("ip"),
-                                    "user": log_data.get("user") if log_data.get("user") != "UNKNOWN" else None,
-                                    "status": log_data.get("status"),
-                                    "details": log_data.get("details"),
-                                }
-                            )
-                        except json.JSONDecodeError:
-                            # Fallback for old format logs: timestamp - ip - user - status - details
-                            try:
-                                if " - " in line and not line.startswith("{"):
-                                    parts = line.split(" - ", 4)
-                                    if len(parts) >= 4:
-                                        timestamp = parts[0]
-                                        ip = parts[1]
-                                        user = parts[2] if parts[2] != "UNKNOWN" else None
-                                        status = parts[3]
-                                        details = parts[4] if len(parts) > 4 else None
-
-                                        logs.append(
-                                            {
-                                                "timestamp": timestamp,
-                                                "ip": ip,
-                                                "user": user,
-                                                "status": status,
-                                                "details": details,
-                                            }
-                                        )
-                            except Exception as e:
-                                logger.error(f"Error parsing old format log line: {line}, error: {e}")
-                                continue
-                        except Exception as e:
-                            logger.error(f"Error parsing JSON log line: {line}, error: {e}")
-                            continue
-            except Exception as e:
-                logger.error(f"Error reading log file: {e}")
-        return jsonify({"logs": logs})
+        return jsonify({"logs": _load_log_entries()})
     except Exception as e:
         logger.error(f"Exception in admin_logs: {e}")
         return jsonify({"error": "Failed to load logs"}), 500
+
+
+@app.route("/admin/stats")
+def admin_stats():
+    """Dashboard statistics computed from the audit log (door usage, security, admin, system)."""
+    if not _require_admin_authenticated():
+        return jsonify({"error": "Authentication required"}), 401
+    try:
+        return jsonify(compute_stats(_load_log_entries(), get_current_time()))
+    except Exception as e:
+        logger.error(f"Exception in admin_stats: {e}")
+        return jsonify({"error": "Failed to compute statistics"}), 500
 
 
 @app.route("/admin/logs/clear", methods=["POST"])
