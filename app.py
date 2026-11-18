@@ -750,6 +750,26 @@ def battery():
     return jsonify({"level": level})
 
 
+def log_admin_action(details, status="ADMIN_SETTING"):
+    """Record a change made from the admin dashboard in the audit log.
+
+    Call it only once the change has actually been applied. Avoid the phrase "TEST MODE" in
+    ``details``: "Clear logs > test entries only" deletes every line containing it, which would
+    erase the record of test mode being switched on.
+    """
+    attempt_logger.info(
+        json.dumps(
+            {
+                "timestamp": get_current_time().isoformat(),
+                "ip": get_client_identifier()[0],
+                "user": "ADMIN",
+                "status": status,
+                "details": details,
+            }
+        )
+    )
+
+
 def log_attempt(status, details, *, user="UNKNOWN", primary_ip=None, session_id=None, now=None, extra=None):
     """Write a single structured entry to the door-attempt audit log (log.txt)."""
     entry = {
@@ -1476,6 +1496,11 @@ def admin_notice_set():
     except OSError as e:
         logger.error(f"Failed to save config: {e}")
         return jsonify({"error": "Could not save config"}), 500
+    if notice:
+        shown = notice if len(notice) <= 80 else notice[:77] + "..."
+        log_admin_action(f"Public notice set: {shown}")
+    else:
+        log_admin_action("Public notice cleared")
     return jsonify({"status": "ok", "notice": notice})
 
 
@@ -1507,8 +1532,10 @@ def admin_test_mode_set():
     test_mode = new_value
     if test_mode:
         logger.warning("TEST MODE ENABLED via admin panel — the door will NOT open.")
+        log_admin_action("Test mode turned on: the door will not open")
     else:
         logger.info("Test mode disabled via admin panel.")
+        log_admin_action("Test mode turned off: the door opens again")
     return jsonify({"status": "ok", "test_mode": test_mode})
 
 
@@ -1564,6 +1591,7 @@ def admin_background_upload():
         return jsonify({"error": "Could not save background"}), 500
 
     logger.info(f"Background image updated by admin ({len(data)} bytes, type={img_type})")
+    log_admin_action(f"Background image replaced ({img_type}, {len(data) // 1024} KB)")
     return jsonify({"status": "ok"})
 
 
@@ -1582,6 +1610,7 @@ def admin_background_reset():
         return jsonify({"error": "Could not restore default"}), 500
 
     logger.info("Background image reset to default by admin")
+    log_admin_action("Background image reset to the default")
     return jsonify({"status": "ok"})
 
 
