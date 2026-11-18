@@ -2,13 +2,14 @@ import copy
 import hmac
 import json
 import os
+import tempfile
 from datetime import datetime, timezone
 from functools import wraps
 from inspect import isfunction
 from threading import RLock
 from typing import Any, Dict, Optional
 
-from atomic_io import atomic_write_text
+from atomic_io import atomic_write_text, backup_files
 
 ISO_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 
@@ -46,8 +47,10 @@ class UsersStore:
       Users only present in base_pins are considered active.
     """
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, backup_dir: Optional[str] = None):
         self.path = path
+        # Where a failed in-place save keeps its backup. None = beside the temp file (legacy).
+        self.backup_dir = backup_dir
         self.data: Dict[str, Any] = {"users": {}}
         # Copy of the store as of the last successful read or write (None = never succeeded).
         self._last_good: Optional[Dict[str, Any]] = None
@@ -71,7 +74,26 @@ class UsersStore:
             raise UsersStoreError(f"Cannot read users store at {self.path}: {e}") from e
         if content.strip() == "":
             # A freshly-created/empty file (e.g. touch'd but never written) has no
-            # data to lose, so it's safe to treat like a missing file.
+            # data to lose, so it's safe to treat like a missing file -- unless a failed save left
+            # a backup behind, in which case the file was emptied by the failure and treating it as
+            # "no users" would let the next write bury the only good copy.
+            # Without an explicit backup_dir the writer may have used the target's directory or the
+            # system temp dir, so look in both.
+            dirs = [self.backup_dir] if self.backup_dir else [os.path.dirname(self.path) or ".", tempfile.gettempdir()]
+            kept = []
+            for d in dirs:
+                try:
+                    kept += backup_files(self.path, d)
+                except OSError as e:
+                    raise UsersStoreError(
+                        f"Users store at {self.path} is empty and the backup folder {d} "
+                        f"can't be checked ({e}); not treating it as a fresh store"
+                    ) from e
+            if kept:
+                raise UsersStoreError(
+                    f"Users store at {self.path} is empty but backups of it were kept: "
+                    f"{', '.join(kept)} (newest first). Check which is right, copy it over the file, and restart"
+                )
             self.data = {"users": {}}
             return
         try:
@@ -93,7 +115,9 @@ class UsersStore:
 
     def _write_store(self) -> None:
         try:
-            atomic_write_text(self.path, json.dumps(self.data, ensure_ascii=False, indent=2))
+            atomic_write_text(
+                self.path, json.dumps(self.data, ensure_ascii=False, indent=2), backup_dir=self.backup_dir
+            )
         except OSError as e:
             # atomic_write_text does the temp-file / cross-device / backup / restore handling
             # (shared with config.ini) and puts the location of any retained backup in the message.
