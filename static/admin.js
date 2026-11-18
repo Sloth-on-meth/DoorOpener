@@ -215,7 +215,7 @@
     });
 
     btnResetBg.addEventListener('click', async function() {
-        if (!confirm('Reset background to the original default image?')) return;
+        if (!(await confirmDialog('Reset background', 'Reset background to the original default image?'))) return;
         try {
             const res = await fetch('/admin/background', {
                 method: 'DELETE',
@@ -631,7 +631,7 @@
     }
 
     // ====== MODALS ======
-    function showModal(title, fieldsHtml, onSubmit) {
+    function showModal(title, fieldsHtml, onSubmit, onClose) {
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
         const card = document.createElement('div');
@@ -649,7 +649,10 @@
         `;
         overlay.appendChild(card);
         document.body.appendChild(overlay);
-        const close = () => { try { document.body.removeChild(overlay); } catch(e) {} };
+        const close = () => {
+            try { document.body.removeChild(overlay); } catch(e) {}
+            if (onClose) onClose();
+        };
         overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
         card.querySelector('#modalCloseBtn').addEventListener('click', close);
         card.querySelector('#modalCancel').addEventListener('click', close);
@@ -657,6 +660,27 @@
             try { await onSubmit(card); close(); } catch(e) {}
         });
         return card;
+    }
+
+    // Show a validation message inside the dialog (replaces the native alert()).
+    function modalError(card, message) {
+        let box = card.querySelector('.modal-error');
+        if (!box) {
+            box = document.createElement('div');
+            box.className = 'modal-error';
+            box.setAttribute('role', 'alert');
+            card.querySelector('.modal-body').appendChild(box);
+        }
+        box.textContent = message;
+    }
+
+    // In-page replacement for confirm(): resolves true on Confirm, false on Cancel/close.
+    function confirmDialog(title, message) {
+        return new Promise(resolve => {
+            showModal(title, `<p class="modal-message">${escapeHtml(message)}</p>`,
+                async () => { resolve(true); },
+                () => resolve(false));
+        });
     }
 
     // ====== USER CRUD ======
@@ -712,9 +736,9 @@
         `, async card => {
             const username = card.querySelector('#um_username').value.trim();
             const pin = card.querySelector('#um_pin').value.trim();
-            if (!username) { alert('Username required'); throw new Error(); }
-            if (!/^[-_.A-Za-z0-9]{1,32}$/.test(username)) { alert('Invalid username'); throw new Error(); }
-            if (!/^\d{4,8}$/.test(pin)) { alert('PIN must be 4-8 digits'); throw new Error(); }
+            if (!username) { modalError(card, 'Username required'); throw new Error(); }
+            if (!/^[-_.A-Za-z0-9]{1,32}$/.test(username)) { modalError(card, 'Invalid username'); throw new Error(); }
+            if (!/^\d{4,8}$/.test(pin)) { modalError(card, 'PIN must be 4-8 digits'); throw new Error(); }
             // No new PIN while the one being saved is in flight.
             const generateBtn = card.querySelector('#um_generate');
             generateBtn.disabled = true;
