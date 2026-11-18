@@ -346,6 +346,38 @@
         }
 
         /* Keypad button visual feedback */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        /* Visible keyboard focus (mouse/touch focus stays unstyled) */
+        .keypad-btn:focus-visible,
+        #ssoLogoutBtn:focus-visible,
+        #ssoOpenBtn:focus-visible,
+        #ssoLoginBtn:focus-visible,
+        .github-btn:focus-visible,
+        .gear-spin-wrap:focus-visible {
+            outline: 3px solid #1976d2;
+            outline-offset: 3px;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+                scroll-behavior: auto !important;
+            }
+        }
+
         .keypad-btn {
             padding: 18px;
             background: rgba(255, 255, 255, 0.2);

@@ -75,6 +75,11 @@
 
         function updatePinDisplay() {
             const display = document.getElementById('pinDisplay');
+            const announce = document.getElementById('pinAnnounce');
+            if (announce) {
+                announce.textContent = currentPin.length === 0 ? '' :
+                    currentPin.length + (currentPin.length === 1 ? ' digit entered' : ' digits entered');
+            }
             if (currentPin.length === 0) {
                 display.innerHTML = '<span class="pin-placeholder">Enter PIN</span>';
             } else {
@@ -734,6 +739,9 @@
             if (ssoLogoutBtn) ssoLogoutBtn.addEventListener('click', () => { window.location.href = '/oidc/logout'; });
 
             // Add keyboard support; ignore auto-repeat when key is held down
+            let focusedByKeyboard = false;
+            document.addEventListener('pointerdown', () => { focusedByKeyboard = false; }, true);
+            document.addEventListener('keydown', e => { if (e.key === 'Tab') focusedByKeyboard = true; }, true);
             document.addEventListener('keydown', function (event) {
                 // Don't intercept keys while focus is inside a text input/textarea
                 const tag = document.activeElement && document.activeElement.tagName;
@@ -750,6 +758,11 @@
                     clearPin();
                     event.preventDefault();
                 } else if (event.key === 'Enter') {
+                    // A button/link the user reached with Tab must handle its own Enter (Tab to "7",
+                    // press Enter = type 7). A mouse-clicked button also keeps focus, so a pointer
+                    // interaction resets this and mouse users still get Enter = open the door.
+                    const el = document.activeElement;
+                    if (focusedByKeyboard && el && (el.tagName === 'BUTTON' || el.tagName === 'A')) return;
                     if (!isSubmitting) openDoor();
                     event.preventDefault();
                 }
