@@ -215,7 +215,7 @@
     });
 
     btnResetBg.addEventListener('click', async function() {
-        if (!confirm('Reset background to the original default image?')) return;
+        if (!(await confirmDialog('Reset background', 'Reset background to the original default image?'))) return;
         try {
             const res = await fetch('/admin/background', {
                 method: 'DELETE',
@@ -631,7 +631,7 @@
     }
 
     // ====== MODALS ======
-    function showModal(title, fieldsHtml, onSubmit) {
+    function showModal(title, fieldsHtml, onSubmit, onClose) {
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
         const card = document.createElement('div');
@@ -649,7 +649,10 @@
         `;
         overlay.appendChild(card);
         document.body.appendChild(overlay);
-        const close = () => { try { document.body.removeChild(overlay); } catch(e) {} };
+        const close = () => {
+            try { document.body.removeChild(overlay); } catch(e) {}
+            if (onClose) onClose();
+        };
         overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
         card.querySelector('#modalCloseBtn').addEventListener('click', close);
         card.querySelector('#modalCancel').addEventListener('click', close);
@@ -659,10 +662,31 @@
         return card;
     }
 
+    // Show a validation message inside the dialog (replaces the native alert()).
+    function modalError(card, message) {
+        let box = card.querySelector('.modal-error');
+        if (!box) {
+            box = document.createElement('div');
+            box.className = 'modal-error';
+            box.setAttribute('role', 'alert');
+            card.querySelector('.modal-body').appendChild(box);
+        }
+        box.textContent = message;
+    }
+
+    // In-page replacement for confirm(): resolves true on Confirm, false on Cancel/close.
+    function confirmDialog(title, message) {
+        return new Promise(resolve => {
+            showModal(title, `<p class="modal-message">${escapeHtml(message)}</p>`,
+                async () => { resolve(true); },
+                () => resolve(false));
+        });
+    }
+
     // ====== USER CRUD ======
-    // Fill the add-user PIN field with a random PIN that nobody else has (chosen by the server).
-    async function fillGeneratedPin(card) {
-        const input = card.querySelector('#um_pin');
+    // Fill the PIN field (add-user by default; the edit dialog passes its own selector) with a random PIN that nobody else has (chosen by the server).
+    async function fillGeneratedPin(card, pinSelector = '#um_pin') {
+        const input = card.querySelector(pinSelector);
         const hint = card.querySelector('#um_pin_hint');
         const confirmBtn = card.querySelector('#modalOk');
         const length = card.querySelector('#um_pinlen').value;
@@ -712,9 +736,9 @@
         `, async card => {
             const username = card.querySelector('#um_username').value.trim();
             const pin = card.querySelector('#um_pin').value.trim();
-            if (!username) { alert('Username required'); throw new Error(); }
-            if (!/^[-_.A-Za-z0-9]{1,32}$/.test(username)) { alert('Invalid username'); throw new Error(); }
-            if (!/^\d{4,8}$/.test(pin)) { alert('PIN must be 4-8 digits'); throw new Error(); }
+            if (!username) { modalError(card, 'Username required'); throw new Error(); }
+            if (!/^[-_.A-Za-z0-9]{1,32}$/.test(username)) { modalError(card, 'Invalid username'); throw new Error(); }
+            if (!/^\d{4,8}$/.test(pin)) { modalError(card, 'PIN must be 4-8 digits'); throw new Error(); }
             // No new PIN while the one being saved is in flight.
             const generateBtn = card.querySelector('#um_generate');
             generateBtn.disabled = true;
@@ -742,17 +766,29 @@
     }
 
     function openEditUser(username) {
-        showModal('Edit User', `
+        const card = showModal('Edit User', `
             <div class="modal-desc-sm">
                 Update PIN for <strong class="modal-hl">${escapeHtml(username)}</strong>
             </div>
             <label class="modal-field-label">New PIN (optional)</label>
-            <input id="um_newpin" class="modal-input" type="password" inputmode="numeric" pattern="[0-9]*" placeholder="leave blank to keep current">
+            <div class="modal-pin-row">
+                <input id="um_newpin" class="modal-input" type="password" inputmode="numeric" pattern="[0-9]*" placeholder="leave blank to keep current">
+                <select id="um_pinlen" class="modal-input modal-pinlen" title="Length of the generated PIN">
+                    <option value="4">4</option><option value="5">5</option><option value="6" selected>6</option>
+                    <option value="7">7</option><option value="8">8</option>
+                </select>
+                <button id="um_generate" type="button" class="btn btn-ghost btn-sm">🎲 Generate</button>
+            </div>
+            <div id="um_pin_hint" class="modal-hint"></div>
         `, async card => {
             const pin = card.querySelector('#um_newpin').value.trim();
             if (pin && !/^\d{4,8}$/.test(pin)) { showToast('PIN must be 4-8 digits', 'error'); throw new Error(); }
-            await editUser(username, pin || undefined);
+            // No new PIN while the one being saved is in flight.
+            const generateBtn = card.querySelector('#um_generate');
+            generateBtn.disabled = true;
+            try { await editUser(username, pin || undefined); } finally { generateBtn.disabled = false; }
         });
+        card.querySelector('#um_generate').addEventListener('click', () => fillGeneratedPin(card, '#um_newpin'));
     }
 
     async function editUser(username, pin) {

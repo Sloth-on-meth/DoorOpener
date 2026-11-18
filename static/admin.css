@@ -482,6 +482,8 @@
         .modal-pin-row { display: flex; gap: 8px; align-items: center; }
         .modal-pin-row .modal-input { flex: 1; min-width: 0; }
         .modal-pin-row .modal-pinlen { flex: 0 0 auto; width: auto; }
+        .modal-error { font-size: 0.85rem; color: #ff8a80; margin-top: 10px; }
+        .modal-message { margin: 0; line-height: 1.4; }
         .modal-hint { font-size: 0.78rem; color: rgba(255,255,255,0.6); margin-top: 6px; min-height: 1.1em; }
 
         /* === SECTION HEADER === */
