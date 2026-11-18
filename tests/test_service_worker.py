@@ -75,7 +75,7 @@ global.fetch = async () => {
 eval(fs.readFileSync(process.argv[1], 'utf8'));
 (async () => {
   let result;
-  const url = 'https://door.test/static/background.jpg?t=12345';
+  const url = process.argv[3] || 'https://door.test/static/background.jpg?t=12345';
   handlers.fetch({ request: { method: 'GET', url }, respondWith: (p) => { result = p; } });
   const res = await result;
   await new Promise((r) => setTimeout(r, 10));
@@ -100,3 +100,19 @@ def test_background_is_network_first_with_a_cache_fallback(mode, body):
     if mode == "online":
         # stored under a fixed key, not the ?t=... URL, so the admin preview can't grow the cache
         assert out["puts"] == ["/static/background.jpg"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+@pytest.mark.parametrize("asset", ["index.js", "index.css"])
+@pytest.mark.parametrize("mode, body", [("online", "FRESH"), ("offline", "OLD-CACHED")])
+def test_app_code_is_network_first_so_updates_are_never_stale(asset, mode, body):
+    """After an update the page must run the new script, not a cache-first copy of the old one."""
+    import json
+
+    url = f"https://door.test/static/{asset}"
+    res = subprocess.run(["node", "-e", BACKGROUND_HARNESS, SW, mode, url], capture_output=True, text=True, timeout=30)
+    assert res.returncode == 0, res.stderr
+    out = json.loads(res.stdout.strip().splitlines()[-1])
+    assert out["body"] == body
+    if mode == "online":
+        assert out["puts"] == [f"/static/{asset}"]

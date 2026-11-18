@@ -63,6 +63,23 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // The app's own code is network-first too. Cache-first would keep serving an old index.js against
+  // new HTML after an update until someone remembered to bump CACHE_VERSION; the cached copy is
+  // only for when the network is down.
+  if (url.pathname === '/static/index.js' || url.pathname === '/static/index.css') {
+    const key = url.pathname;
+    event.respondWith(
+      fetch(req).then((res) => {
+        if (res.ok) {
+          const resClone = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(key, resClone));
+        }
+        return res;
+      }).catch(() => caches.match(key))
+    );
+    return;
+  }
+
   // For static assets, use cache-first
   if (url.pathname.startsWith('/static/')) {
     event.respondWith(
